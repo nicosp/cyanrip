@@ -18,7 +18,20 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <cdio/cdio.h>
-#include "cyanrip_main.h"
 
-lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, track_t track_number);
+#define SUBQ_SIZE 16
+
+/* Size of reads of audio + subchannel Q data. 2352 bytes for audio + 16 bytes for subchannel Q */
+#define CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ (CDIO_CD_FRAMESIZE_RAW + SUBQ_SIZE)
+
+/**
+ * Reads audio + subchannel Q data from a CD device
+ * into audio_subq_buf.
+ * 
+ * The buffer must be large enough to hold CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ bytes.
+ * 
+ * Note: The Subchannel Q data still needs to be verified for CRC validity after reading.
+ */
+driver_return_code_t cyanrip_read_audio_subq_sector(const CdIo_t *p_cdio, uint8_t *audio_subq_buf, const lsn_t lsn);
