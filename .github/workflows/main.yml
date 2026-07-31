@@ -7,6 +7,20 @@ on:
     types: [ released ]
 
 jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install meson ninja pkg-config nasm ffmpeg libcdio-paranoia libmusicbrainz curl
+
+      - name: Build
+        run: |
+          export PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          meson setup build
+          ninja -C build
+
   mingw:
     runs-on: windows-latest
     env:
