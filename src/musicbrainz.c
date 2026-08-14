@@ -18,16 +18,89 @@
 
 #include "musicbrainz.h"
 #include "qrcode.h"
+#include "discid.h"
 #include "cyanrip_log.h"
 
 #include <musicbrainz5/mb5_c.h>
 #include <libavutil/crc.h>
 #include <libavutil/time.h>
+#include <libavutil/bprint.h>
 
 /* MusicBrainz will occasionally refuse to serve a request, in particular when
  * queried again right after a cancelled rip. Wait it out and retry. */
 #define MB_RETRY_DELAY_MS 15000
 #define MB_MAX_RETRIES 3
+
+/* Percent-encodes a string for use as a single URL query parameter value. */
+static void bprint_url_encode(AVBPrint *buf, const char *s)
+{
+    static const char *unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                     "abcdefghijklmnopqrstuvwxyz"
+                                     "0123456789-_.~";
+    for (const uint8_t *p = (const uint8_t *)s; *p; p++) {
+        if (strchr(unreserved, *p))
+            av_bprint_chars(buf, *p, 1);
+        else
+            av_bprintf(buf, "%%%02X", *p);
+    }
+}
+
+/* Appends "&key=value" to buf, percent-encoding value. No-op if value is
+ * NULL/empty. */
+static void bprint_url_param(AVBPrint *buf, const char *key, const char *val)
+{
+    if (!val || !val[0])
+        return;
+    av_bprintf(buf, "&%s=", key);
+    bprint_url_encode(buf, val);
+}
+
+char *crip_mb_seed_url(cyanrip_ctx *ctx)
+{
+    const char *album = dict_get(ctx->gnudb, "album");
+    const char *album_artist = dict_get(ctx->gnudb, "album_artist");
+
+    char *toc = crip_disc_toc_string(ctx);
+    if (!toc)
+        return NULL;
+
+    int nb_tracks = ctx->id_last_track - ctx->id_first_track + 1;
+    int have_track_titles = 0;
+    for (int i = 0; i < nb_tracks; i++)
+        if (dict_get(ctx->tracks[i].gnudb, "title"))
+            have_track_titles = 1;
+
+    if (!album && !album_artist && !have_track_titles) {
+        av_free(toc);
+        return NULL;
+    }
+
+    AVBPrint buf;
+    av_bprint_init(&buf, 0, AV_BPRINT_SIZE_AUTOMATIC);
+
+    av_bprintf(&buf, "https://musicbrainz.org/release/add?mediums.0.format=CD");
+
+    bprint_url_param(&buf, "name", album);
+    bprint_url_param(&buf, "artist_credit.names.0.name", album_artist);
+
+    /* Literal '+'-separated, same as the plain TOC-attach URL: musicbrainz.org
+     * decodes '+' as a space in query values, which is what its TOC parser
+     * expects between the numbers. */
+    av_bprintf(&buf, "&mediums.0.toc=%s", toc);
+    av_free(toc);
+
+    for (int i = 0; i < nb_tracks; i++) {
+        char key[80];
+        snprintf(key, sizeof(key), "mediums.0.track.%i.name", i);
+        bprint_url_param(&buf, key, dict_get(ctx->tracks[i].gnudb, "title"));
+        snprintf(key, sizeof(key), "mediums.0.track.%i.artist_credit.names.0.name", i);
+        bprint_url_param(&buf, key, dict_get(ctx->tracks[i].gnudb, "artist"));
+    }
+
+    char *url;
+    av_bprint_finalize(&buf, &url);
+    return url;
+}
 
 #define READ_MB(FUNC, MBCTX, DICT, KEY, APPEND)                                     \
     do {                                                                            \
@@ -525,6 +598,15 @@ end:
             cyanrip_log(ctx, 0, "%s\n", ctx->mb_submission_url);
             crip_print_qrcode(ctx->mb_submission_url);
         }
+
+        char *seed_url = crip_mb_seed_url(ctx);
+        if (seed_url) {
+            cyanrip_log(ctx, 0, "GNUdb has an entry for this disc, so here's a release "
+                        "pre-filled with its album/track titles instead, if you'd rather use that:\n");
+            cyanrip_log(ctx, 0, "%s\n", seed_url);
+            av_free(seed_url);
+        }
+
         if (ret)
             cyanrip_log(ctx, 0, "To continue add metadata via -a or -t, or ignore via -N!\n");
     }

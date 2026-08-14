@@ -23,3 +23,10 @@
 /* Returns 0 on success, !0 on hard error */
 int crip_fill_metadata(cyanrip_ctx *ctx, int manual_metadata_specified,
                        int release_idx, char *release_str, int discnumber);
+
+/* Builds a musicbrainz.org/release/add URL, pre-filled via MusicBrainz's
+ * release editor seeding query parameters, from ctx->gnudb and any
+ * per-track GNUdb titles/artists in ctx->tracks[i].gnudb (see gnudb.h).
+ * Returns NULL if there's nothing to seed it with (e.g. no GNUdb entry).
+ * Free the result with av_free(). */
+char *crip_mb_seed_url(cyanrip_ctx *ctx);

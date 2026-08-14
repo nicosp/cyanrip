@@ -49,6 +49,7 @@ sources = [
     'fifo_packet.c',
 
     'discid.c',
+    'gnudb.c',
     'musicbrainz.c',
     'qrcode.c',
     'coverart.c',

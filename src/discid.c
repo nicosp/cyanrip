@@ -23,6 +23,25 @@
 #include <libavutil/base64.h>
 #include <libavutil/bprint.h>
 
+char *crip_disc_toc_string(cyanrip_ctx *ctx)
+{
+    if (!ctx->id_last_track)
+        return NULL;
+
+    AVBPrint toc;
+    av_bprint_init(&toc, 0, AV_BPRINT_SIZE_AUTOMATIC);
+
+    av_bprintf(&toc, "%i+%i+%u", ctx->id_first_track, ctx->id_last_track,
+               ctx->id_offsets[0]);
+
+    for (int i = ctx->id_first_track; i <= ctx->id_last_track; i++)
+        av_bprintf(&toc, "+%u", ctx->id_offsets[i]);
+
+    char *str;
+    av_bprint_finalize(&toc, &str);
+    return str;
+}
+
 int crip_fill_discid(cyanrip_ctx *ctx)
 {
     /* Follows libdiscid's mb_disc_load_toc() and create_disc_id(). The TOC
@@ -125,19 +144,21 @@ int crip_fill_discid(cyanrip_ctx *ctx)
 
     av_dict_set(&ctx->meta, "cddb", temp, 0);
 
+    ctx->id_first_track = first_track;
+    ctx->id_last_track = last_track;
+    memcpy(ctx->id_offsets, offsets, sizeof(offsets));
+
     /* TOC string */
+    char *toc = crip_disc_toc_string(ctx);
+
     AVBPrint buf;
     av_bprint_init(&buf, 0, AV_BPRINT_SIZE_AUTOMATIC);
 
-    av_bprintf(&buf, "https://musicbrainz.org/cdtoc/attach?toc=");
-
-    av_bprintf(&buf, "%i%s%i%s%u", first_track, "+", last_track, "+", offsets[0]);
-
-    for (int i = first_track; i <= last_track; i++)
-        av_bprintf(&buf, "%s%u", "+", offsets[i]);
-
+    av_bprintf(&buf, "https://musicbrainz.org/cdtoc/attach?toc=%s", toc);
     av_bprintf(&buf, "&tracks=%i", last_track);
     av_bprintf(&buf, "&id=%s", discid);
+
+    av_free(toc);
 
     av_bprint_finalize(&buf, &ctx->mb_submission_url);
 

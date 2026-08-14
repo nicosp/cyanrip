@@ -21,3 +21,10 @@
 #include <cyanrip_main.h>
 
 int crip_fill_discid(cyanrip_ctx *ctx);
+
+/* Builds the MusicBrainz disc TOC string: "first+last+leadout+off1+off2+...",
+ * '+'-joined so it can be dropped straight into a URL query value
+ * (musicbrainz.org decodes '+' as a space there), from the TOC the disc IDs
+ * were computed from. NULL if crip_fill_discid() hasn't computed them.
+ * Free the result with av_free(). */
+char *crip_disc_toc_string(cyanrip_ctx *ctx);

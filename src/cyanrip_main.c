@@ -39,6 +39,7 @@
 #include "cue_writer.h"
 #include "checksums.h"
 #include "discid.h"
+#include "gnudb.h"
 #include "musicbrainz.h"
 #include "qrcode.h"
 #include "coverart.h"
@@ -103,6 +104,7 @@ static void free_track(cyanrip_ctx *ctx, cyanrip_track *t)
 
     crip_free_art(&t->art);
     av_dict_free(&t->meta);
+    av_dict_free(&t->gnudb);
     av_free(t->ar_db_entries);
     av_free(t->acoustid_fingerprint);
 }
@@ -136,6 +138,7 @@ static void cyanrip_ctx_end(cyanrip_ctx **s)
 
     free(ctx->settings.dev_path);
     av_dict_free(&ctx->meta);
+    av_dict_free(&ctx->gnudb);
     av_freep(&ctx);
 
     *s = NULL;
@@ -1590,6 +1593,10 @@ int main(int argc, char **argv)
                 "Cover art: title=path (or N=path per-track, repeatable)");
     GEN_OPT_ONE(opts_list, bool,    no_musicbrainz, "N", 0, 0, 0, 0, 0,
                 "Disable MusicBrainz lookup");
+    GEN_OPT_ONE(opts_list, char *,  gnudb_email, "e", 1, 1, NULL, 0, 0,
+                "GNUdb contact email (XLD's \"CDDB Mail\"); enables GNUdb lookup");
+    GEN_OPT_ONE(opts_list, char *,  gnudb_host, "g", 1, 1, "gnudb.gnudb.org", 0, 0,
+                "GNUdb server, same default XLD/EAC use");
     GEN_OPT_ONE(opts_list, bool,    no_accurip, "A", 0, 0, 0, 0, 0,
                 "Disable AccurateRip database query and validation");
     GEN_OPT_ONE(opts_list, bool,    no_acoustid, "B", 0, 0, 0, 0, 0,
@@ -1669,6 +1676,8 @@ int main(int argc, char **argv)
     settings.enable_replaygain          = !no_replaygain;
     settings.disable_data_tracks        = no_data_tracks;
     settings.disable_mb                 = no_musicbrainz;
+    settings.gnudb_email                = gnudb_email;
+    settings.gnudb_host                 = gnudb_host;
     settings.disable_accurip            = no_accurip;
     settings.disable_acoustid           = no_acoustid;
     settings.acoustid_key               = acoustid_key;
@@ -1953,8 +1962,15 @@ int main(int argc, char **argv)
         goto end;
     }
 
-    /* Default album title */
-    av_dict_set(&ctx->meta, "album", "Unknown disc", 0);
+    /* Fill in album/track metadata from GNUdb, if it's configured (-e) and
+     * has an entry for this disc. Must run before the MusicBrainz lookup
+     * below, so a successful lookup takes priority, and before the
+     * "Default album title" block, so its (lower priority) values aren't
+     * clobbered by the fallback default. */
+    crip_fill_gnudb(ctx);
+
+    /* Default album title, unless GNUdb already gave us one */
+    av_dict_set(&ctx->meta, "album", "Unknown disc", AV_DICT_DONT_OVERWRITE);
     av_dict_set(&ctx->meta, "comment", "cyanrip "PROJECT_VERSION_STRING, 0);
     av_dict_set(&ctx->meta, "media",
                 ctx->settings.decode_hdcd ? "HDCD" : "CD", 0);
@@ -2010,6 +2026,14 @@ int main(int argc, char **argv)
     if (ctx->settings.print_info_only && ctx->mb_submission_url) {
         cyanrip_log(ctx, 0, "MusicBrainz URL:\n%s\n", ctx->mb_submission_url);
         crip_print_qrcode(ctx->mb_submission_url);
+    }
+
+    if (ctx->settings.print_info_only) {
+        char *seed_url = crip_mb_seed_url(ctx);
+        if (seed_url) {
+            cyanrip_log(ctx, 0, "MusicBrainz URL (pre-filled from GNUdb):\n%s\n", seed_url);
+            av_free(seed_url);
+        }
     }
 
     /* Copy album cover arts */

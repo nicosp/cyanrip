@@ -115,6 +115,11 @@ typedef struct cyanrip_settings {
     int over_under_read_frames;
     int print_info_only;
     int disable_mb;
+    char *gnudb_email; /* Contact email for GNUdb lookups (XLD's "CDDB Mail"
+                         * preference); GNUdb lookups are disabled unless
+                         * this is set */
+    char *gnudb_host;  /* GNUdb server, defaults to gnudb.gnudb.org - same
+                         * default XLD/EAC use */
     float bitrate;
     int decode_hdcd;
     int disable_accurip;
@@ -163,6 +168,7 @@ typedef struct cyanrip_track {
     int number; /* Human readable track number, may be 0 */
     int cd_track_number; /* Actual track on the CD, may be 0 */
     AVDictionary *meta; /* Disc's AVDictionary gets copied here */
+    AVDictionary *gnudb; /* Raw GNUdb (CDDB) info for this track, if any (title/artist) */
     int total_repeats; /* How many times the track was re-ripped */
     int index; /* Array position + 1 */
 
@@ -258,6 +264,7 @@ typedef struct cyanrip_ctx {
 
     /* Metadata */
     AVDictionary *meta;
+    AVDictionary *gnudb; /* Raw disc-level GNUdb (CDDB) info, if any (album/album_artist/date/genre) */
     enum CRIPAccuDBStatus ar_db_status;
 
     /* State */
@@ -268,6 +275,8 @@ typedef struct cyanrip_ctx {
     lsn_t end_lsn;
     lsn_t duration_frames;
     lsn_t id_leadout_lsn; /* Lead-out the MusicBrainz and CDDB IDs derive from */
+    int id_first_track, id_last_track; /* Tracks the IDs cover, 0 if none */
+    int32_t id_offsets[100]; /* Their offsets by track number, [0] is the lead-out */
 
     /* ETA */
     CRSlidingWinCtx eta_ctx;
