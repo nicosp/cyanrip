@@ -82,6 +82,7 @@ typedef struct {
     track_format_t cur_track_format;
     int simulate_libcdio_pregap_support;
     int nonbcd;
+    lsn_t ctx_start_lsn; /* fed to cyanrip_ctx.start_lsn in run(); only matters for the first track */
 
     lsn_fault_t faults[MAX_FAULTS];
     int num_faults;
@@ -267,6 +268,7 @@ static lsn_t run(fake_disc_t *d)
 {
     cyanrip_ctx ctx;
     memset(&ctx, 0, sizeof(ctx)); /* fresh ctx each time: subq_needs_bcd_fixup starts at 0 */
+    ctx.start_lsn = d->ctx_start_lsn;
     g_disc = d;
     d->reads_issued = 0;
     return cyanrip_get_track_pregap_lsn(&ctx, d->cur_track_number);
@@ -291,14 +293,26 @@ static void check_true(const char *what, int cond)
 int main(void)
 {
     /* First track: nothing precedes it to hold a pregap, so there is no
-     * boundary to search and no subq work to do. Anything before its start is
-     * lead-in/hidden-track territory, which the caller handles itself. */
+     * boundary to search and no subq work to do - the pregap, if any, is
+     * simply the gap between the disc's start and the track's start. */
     {
         fake_disc_t d = make_disc(1000, 1150, 1300);
         d.cur_track_number = d.first_track_num;
+        d.ctx_start_lsn = d.cur_track_start_lsn; /* no lead-in gap */
         lsn_t got = run(&d);
-        check_lsn("first track", got, CDIO_INVALID_LSN);
-        check_true("first track: no subq reads", d.reads_issued == 0);
+        check_lsn("first track, no lead-in gap", got, CDIO_INVALID_LSN);
+        check_true("first track, no lead-in gap: no subq reads", d.reads_issued == 0);
+    }
+
+    /* First track with a lead-in gap (e.g. a hidden track before it): report
+     * the disc's start as the pregap, still without any subq work. */
+    {
+        fake_disc_t d = make_disc(1000, 1150, 1300);
+        d.cur_track_number = d.first_track_num;
+        d.ctx_start_lsn = 0;
+        lsn_t got = run(&d);
+        check_lsn("first track, lead-in gap", got, d.ctx_start_lsn);
+        check_true("first track, lead-in gap: no subq reads", d.reads_issued == 0);
     }
 
     /* libcdio already knows the pregap (e.g. a cue sheet): use it directly,

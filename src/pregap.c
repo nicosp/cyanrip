@@ -230,10 +230,10 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
         return CDIO_INVALID_LSN;
     }
 
-    /* First track has no pregap */
+    /* First track's pregap is the start of the disc */
     const track_t first_track_number = cdio_get_first_track_num(ctx->cdio);
     if (track_number == first_track_number || track_number <= 1)
-        return CDIO_INVALID_LSN;
+        return ctx->start_lsn == track_start_lsn ? CDIO_INVALID_LSN : ctx->start_lsn;
 
     const uint8_t prev_track_number = track_number - 1;
 
