@@ -39,6 +39,7 @@
 #include "accurip.h"
 #include "os_compat.h"
 #include "cyanrip_encode.h"
+#include "data_read.h"
 
 static char cyanrip_helpstr[128];
 
@@ -628,6 +629,166 @@ static double sample_peak_rel_amp(const uint8_t *data, const int bytes)
     return (double)sample_peak/32768.0;
 }
 
+/* Reads a data track sector by sector, writing the raw MODE1/2352 sectors
+ * (sync + header + user data + EDC/ECC, exactly as declared in the CUE
+ * sheet) to a .bin file. Unlike audio tracks, a data sector already carries
+ * its own error detection/correction, so a single successful read of a
+ * sector is trusted; only outright read failures are retried. */
+static int cyanrip_rip_data_track(cyanrip_ctx *ctx, cyanrip_track *t)
+{
+    int ret = 0;
+    int line_len = 0;
+    char line[4096];
+    uint8_t sector[CDIO_CD_FRAMESIZE_RAW];
+
+    FILE *binfps[CYANRIP_FORMATS_NB] = { NULL };
+
+    for (int i = 0; i < ctx->settings.outputs_num; i++) {
+        char *filename = crip_get_path(ctx, CRIP_PATH_DATA, 1,
+                                       &crip_fmt_info[ctx->settings.outputs[i]], t);
+        if (!filename) {
+            cyanrip_log(ctx, 0, "Unable to generate output path for track %i!\n", t->number);
+            ret = AVERROR(EINVAL);
+            goto end;
+        }
+
+        binfps[i] = fopen(filename, "wb");
+        if (!binfps[i]) {
+            cyanrip_log(ctx, 0, "Couldn't open path \"%s\" for writing: %s!\n"
+                        "Invalid folder name? Try -D <folder>.\n",
+                        filename, av_err2str(AVERROR(errno)));
+            av_freep(&filename);
+            ret = AVERROR(EINVAL);
+            goto end;
+        }
+
+        av_freep(&filename);
+    }
+
+    track_set_creation_time(ctx, t);
+
+    const AVCRC *crc_ctx = av_crc_get_table(AV_CRC_32_IEEE_LE);
+    uint32_t crc = UINT32_MAX;
+
+    int start_err = ctx->total_error_count;
+    int64_t frame_last_read = av_gettime_relative();
+
+    for (int i = 0; i < t->frames; i++) {
+        if (get_media_changed(ctx->cdio)) {
+            cyanrip_log(ctx, 0, "\nDrive media changed, stopping!\n");
+            ret = AVERROR(EINVAL);
+            goto end;
+        }
+
+        if (quit_now) {
+            cyanrip_log(ctx, 0, "\nStopping, ripping incomplete!\n");
+            break;
+        }
+
+        lsn_t lsn = t->start_lsn + i;
+        driver_return_code_t drc;
+        int tries = 0;
+        do {
+            drc = cyanrip_read_data_sector(ctx->cdio, sector, lsn);
+        } while (drc != DRIVER_OP_SUCCESS && ++tries < ctx->settings.max_retries);
+
+        if (drc != DRIVER_OP_SUCCESS) {
+            cyanrip_log(ctx, 0, "\nRead error at LSN %i, filling with zeroes!\n", lsn);
+            memset(sector, 0, sizeof(sector));
+            ctx->total_error_count++;
+        }
+
+        crc = av_crc(crc_ctx, crc, sector, sizeof(sector));
+
+        for (int j = 0; j < ctx->settings.outputs_num; j++) {
+            if (fwrite(sector, sizeof(sector), 1, binfps[j]) != 1) {
+                cyanrip_log(ctx, 0, "\nError writing to output file for track %i!\n", t->number);
+                ret = AVERROR(EIO);
+                goto end;
+            }
+        }
+
+        if (line_len > 0) {
+            cyanrip_log(NULL, 0, "\r");
+            line_len = 0;
+        }
+
+        line_len = snprintf(line, sizeof(line),
+                            "Ripping data track %i, progress - %0.2f%%",
+                            t->number, ((double)(i + 1)/t->frames)*100.0f);
+
+        ctx->frames_read++;
+
+        int64_t cur_time   = av_gettime_relative();
+        int64_t frame_diff = cur_time - frame_last_read;
+        frame_last_read = cur_time;
+
+        int64_t diff = cr_sliding_win(&ctx->eta_ctx, frame_diff, cur_time,
+                                      av_make_q(1, 1000000),
+                                      1000000LL * 1200LL, 1);
+
+        int64_t seconds = (ctx->frames_to_read - ctx->frames_read) * diff;
+
+        int hours = 0;
+        while (seconds >= (3600LL * 1000000LL)) {
+            seconds -= (3600LL * 1000000LL);
+            hours++;
+        }
+
+        int minutes = 0;
+        while (seconds >= (60LL * 1000000LL)) {
+            seconds -= (60LL * 1000000LL);
+            minutes++;
+        }
+
+        seconds = av_rescale(seconds, 1, 1000000);
+
+        if (seconds == 60) {
+            minutes++;
+            seconds = 0;
+        }
+
+        if (minutes == 60) {
+            hours++;
+            minutes = 0;
+        }
+
+        if (hours)
+            line_len += snprintf(line + line_len, sizeof(line) - line_len,
+                                 ", ETA - %ih %im", hours, minutes);
+        else if (minutes)
+            line_len += snprintf(line + line_len, sizeof(line) - line_len,
+                                 ", ETA - %im", minutes);
+        else
+            line_len += snprintf(line + line_len, sizeof(line) - line_len,
+                                 ", ETA - %" PRId64 "s", seconds);
+
+        if (ctx->total_error_count - start_err)
+            line_len += snprintf(line + line_len, sizeof(line) - line_len,
+                                 ", errors - %i", ctx->total_error_count - start_err);
+
+        cyanrip_log(NULL, 0, "%s", line);
+    }
+
+    if (line_len > 0)
+        cyanrip_log(NULL, 0, "\n");
+
+    t->eac_crc = crc ^ UINT32_MAX;
+    t->computed_crcs = 1;
+
+end:
+    for (int i = 0; i < ctx->settings.outputs_num; i++)
+        if (binfps[i])
+            fclose(binfps[i]);
+
+    if (!ret) {
+        cyanrip_log_track_end(ctx, t);
+        cyanrip_cue_track(ctx, t);
+    }
+
+    return ret;
+}
+
 static int cyanrip_rip_track(cyanrip_ctx *ctx, cyanrip_track *t)
 {
     int ret = 0;
@@ -635,12 +796,8 @@ static int cyanrip_rip_track(cyanrip_ctx *ctx, cyanrip_track *t)
     int max_line_len = 0;
     char line[4096];
 
-    if (t->track_is_data) {
-        cyanrip_log(ctx, 0, "Track %i is data:\n", t->number);
-        cyanrip_log_track_end(ctx, t);
-        cyanrip_cue_track(ctx, t);
-        return 0;
-    }
+    if (t->track_is_data)
+        return cyanrip_rip_data_track(ctx, t);
 
     /* Set creation time at the start of ripping */
     track_set_creation_time(ctx, t);
