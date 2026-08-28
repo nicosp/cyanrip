@@ -629,6 +629,69 @@ static double sample_peak_rel_amp(const uint8_t *data, const int bytes)
     return (double)sample_peak/32768.0;
 }
 
+/* Appends an ETA and, if any occurred, error-count suffix to `line`
+ * (already containing `line_len` bytes of caller-composed progress text),
+ * using a sliding-window average of recent frame times to estimate the
+ * remaining duration for the whole rip. Also advances ctx->frames_read and
+ * *frame_last_read. `start_err` is the track's error count baseline to
+ * diff against. Returns the updated length of `line`. */
+static int cyanrip_append_progress_eta(cyanrip_ctx *ctx, char *line, size_t line_size,
+                                        int line_len, int64_t *frame_last_read,
+                                        int start_err)
+{
+    ctx->frames_read++;
+
+    int64_t cur_time   = av_gettime_relative();
+    int64_t frame_diff = cur_time - *frame_last_read;
+    *frame_last_read = cur_time;
+
+    int64_t diff = cr_sliding_win(&ctx->eta_ctx, frame_diff, cur_time,
+                                  av_make_q(1, 1000000),
+                                  1000000LL * 1200LL, 1);
+
+    int64_t seconds = (ctx->frames_to_read - ctx->frames_read) * diff;
+
+    int hours = 0;
+    while (seconds >= (3600LL * 1000000LL)) {
+        seconds -= (3600LL * 1000000LL);
+        hours++;
+    }
+
+    int minutes = 0;
+    while (seconds >= (60LL * 1000000LL)) {
+        seconds -= (60LL * 1000000LL);
+        minutes++;
+    }
+
+    seconds = av_rescale(seconds, 1, 1000000);
+
+    if (seconds == 60) {
+        minutes++;
+        seconds = 0;
+    }
+
+    if (minutes == 60) {
+        hours++;
+        minutes = 0;
+    }
+
+    if (hours)
+        line_len += snprintf(line + line_len, line_size - line_len,
+                             ", ETA - %ih %im", hours, minutes);
+    else if (minutes)
+        line_len += snprintf(line + line_len, line_size - line_len,
+                             ", ETA - %im", minutes);
+    else
+        line_len += snprintf(line + line_len, line_size - line_len,
+                             ", ETA - %" PRId64 "s", seconds);
+
+    if (ctx->total_error_count - start_err)
+        line_len += snprintf(line + line_len, line_size - line_len,
+                             ", errors - %i", ctx->total_error_count - start_err);
+
+    return line_len;
+}
+
 /* Reads a data track sector by sector, writing the raw MODE1/2352 sectors
  * (sync + header + user data + EDC/ECC, exactly as declared in the CUE
  * sheet) to a .bin file. Unlike audio tracks, a data sector already carries
@@ -717,55 +780,8 @@ static int cyanrip_rip_data_track(cyanrip_ctx *ctx, cyanrip_track *t)
                             "Ripping data track %i, progress - %0.2f%%",
                             t->number, ((double)(i + 1)/t->frames)*100.0f);
 
-        ctx->frames_read++;
-
-        int64_t cur_time   = av_gettime_relative();
-        int64_t frame_diff = cur_time - frame_last_read;
-        frame_last_read = cur_time;
-
-        int64_t diff = cr_sliding_win(&ctx->eta_ctx, frame_diff, cur_time,
-                                      av_make_q(1, 1000000),
-                                      1000000LL * 1200LL, 1);
-
-        int64_t seconds = (ctx->frames_to_read - ctx->frames_read) * diff;
-
-        int hours = 0;
-        while (seconds >= (3600LL * 1000000LL)) {
-            seconds -= (3600LL * 1000000LL);
-            hours++;
-        }
-
-        int minutes = 0;
-        while (seconds >= (60LL * 1000000LL)) {
-            seconds -= (60LL * 1000000LL);
-            minutes++;
-        }
-
-        seconds = av_rescale(seconds, 1, 1000000);
-
-        if (seconds == 60) {
-            minutes++;
-            seconds = 0;
-        }
-
-        if (minutes == 60) {
-            hours++;
-            minutes = 0;
-        }
-
-        if (hours)
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", ETA - %ih %im", hours, minutes);
-        else if (minutes)
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", ETA - %im", minutes);
-        else
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", ETA - %" PRId64 "s", seconds);
-
-        if (ctx->total_error_count - start_err)
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", errors - %i", ctx->total_error_count - start_err);
+        line_len = cyanrip_append_progress_eta(ctx, line, sizeof(line), line_len,
+                                               &frame_last_read, start_err);
 
         cyanrip_log(NULL, 0, "%s", line);
     }
@@ -918,55 +934,8 @@ repeat_ripping:;
                              (!ctx->settings.ripping_retries || repeat_mode_encode) ? " and encoding " : " ",
                              t->number, ((double)(i + 1)/frames)*100.0f);
 
-        ctx->frames_read++;
-
-        int64_t cur_time   = av_gettime_relative();
-        int64_t frame_diff = cur_time - frame_last_read;
-        frame_last_read = cur_time;
-
-        int64_t diff = cr_sliding_win(&ctx->eta_ctx, frame_diff, cur_time,
-                                      av_make_q(1, 1000000),
-                                      1000000LL * 1200LL, 1);
-
-        int64_t seconds = (ctx->frames_to_read - ctx->frames_read) * diff;
-
-        int hours = 0;
-        while (seconds >= (3600LL * 1000000LL)) {
-            seconds -= (3600LL * 1000000LL);
-            hours++;
-        }
-
-        int minutes = 0;
-        while (seconds >= (60LL * 1000000LL)) {
-            seconds -= (60LL * 1000000LL);
-            minutes++;
-        }
-
-        seconds = av_rescale(seconds, 1, 1000000);
-
-        if (seconds == 60) {
-            minutes++;
-            seconds = 0;
-        }
-
-        if (minutes == 60) {
-            hours++;
-            minutes = 0;
-        }
-
-        if (hours)
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", ETA - %ih %im", hours, minutes);
-        else if (minutes)
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", ETA - %im", minutes);
-        else
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", ETA - %" PRId64 "s", seconds);
-
-        if (ctx->total_error_count - start_err)
-            line_len += snprintf(line + line_len, sizeof(line) - line_len,
-                                 ", errors - %i", ctx->total_error_count - start_err);
+        line_len = cyanrip_append_progress_eta(ctx, line, sizeof(line), line_len,
+                                               &frame_last_read, start_err);
 
         max_line_len = FFMAX(line_len, max_line_len);
         if (line_len < max_line_len) {
