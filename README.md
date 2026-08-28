@@ -12,6 +12,7 @@ Features
  * [CD Deemphasis (TOC + subcode)](#deemphasis)
  * [Multi-disc album ripping](#multi-disc-albums)
  * [ReplayGain v2 tagging](#replaygain)
+ * [Data track extraction](#data-tracks) for Enhanced CD / Mixed Mode / CD-Extra discs
  * Able to encode to multiple formats in parallel
  * [Cover image embedding](#cover-art-embedding) in mp3, flac, aac and opus
  * Automatic [cover art image downloading](#cover-art-downloading)
@@ -359,6 +360,25 @@ CUE sheet
 cyanrip will generate a CUE sheet from which a byte-exact duplicate of the disc can be made. By default, pregaps are kept in the CUE sheet as being appended to the previous track (except for the first track, where the pregap is dropped and signalled as silence). This is reffered to as "noncompliant" by [hydrogenaudio](https://wiki.hydrogenaud.io/index.php?title=Cue_sheet#Multiple_files_with_gaps_.28Noncompliant.29).
 
 Custom changes in the way pregaps are handled will be reflected in the CUE file. For example, dropping a pregap will signal [silence](https://wiki.hydrogenaud.io/index.php?title=Cue_sheet#Multiple_files_with_gaps_left_out) in the CUE sheet. Appending a pregap to the track will accordingly mark the track as [having two audio indices](https://wiki.hydrogenaud.io/index.php?title=Cue_sheet#Multiple_files_with_corrected_gaps).
+
+
+Data tracks
+-----------
+Some discs (Enhanced CD, CD-Extra, Mixed Mode) carry a data track alongside the audio, typically holding bonus videos, a multimedia application, or a bootable/game data session. cyanrip detects this automatically and, instead of decoding/encoding it, dumps it as-is to a `.bin` file, referenced from the CUE sheet as a `MODE1/2352` `BINARY` track.
+
+The `.bin` is a raw sector dump: each 2352-byte sector is copied verbatim (sync bytes, header, the 2048 bytes of real data, and the EDC/ECC bytes), exactly like a `.bin`/`.cue` image from other ripping tools. This is deliberate: it preserves the track exactly as it is on the disc, including anything a "cooked" read would discard or fail to reproduce (non-standard sectors, damaged or intentionally malformed data, etc.), the same preservation-first approach cyanrip takes with audio.
+
+Because of that, the `.bin` isn't directly mountable or browsable as-is — you first need to turn it into a plain ISO9660 image by dropping the per-sector overhead. The easiest way is a dedicated bin/cue tool that understands the CUE sheet directly, e.g. `bchunk` on Linux, or PowerISO/UltraISO/IsoBuster on Windows, which will produce a normal `.iso` (or let you mount the `.bin`/`.cue` pair directly as a virtual drive).
+
+If you'd rather do it by hand, each sector only needs its first 16 bytes (sync + header) and last 288 bytes (EDC/ECC) stripped, keeping the 2048 bytes in between:
+
+```python
+with open("track.bin", "rb") as f, open("track.iso", "wb") as out:
+    while (sector := f.read(2352)):
+        out.write(sector[16:16 + 2048])
+```
+
+The resulting `track.iso` is a standard ISO9660 image, and can be mounted or extracted with any regular tool (`mount -o loop`, `xorriso`, `7z`, `bsdtar`, etc.).
 
 
 Links
