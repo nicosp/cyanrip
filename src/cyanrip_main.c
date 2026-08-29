@@ -39,7 +39,6 @@
 #include "accurip.h"
 #include "os_compat.h"
 #include "cyanrip_encode.h"
-#include "data_read.h"
 
 static char cyanrip_helpstr[128];
 
@@ -692,17 +691,20 @@ static int cyanrip_append_progress_eta(cyanrip_ctx *ctx, char *line, size_t line
     return line_len;
 }
 
-/* Reads a data track sector by sector, writing the raw MODE1/2352 sectors
- * (sync + header + user data + EDC/ECC, exactly as declared in the CUE
- * sheet) to a .bin file. Unlike audio tracks, a data sector already carries
- * its own error detection/correction, so a single successful read of a
- * sector is trusted; only outright read failures are retried. */
+/* Reads a data track sector by sector via cdio_read_mode1_sectors(),
+ * writing the 2048 bytes of user data per sector (as declared by the CUE
+ * sheet's MODE1/2048) to an .iso file. This assumes the track is made up
+ * of plain Mode 1 Form 1 sectors; it does not preserve the sync/header/
+ * EDC-ECC bytes, but reads identically on every platform libcdio supports.
+ * Unlike audio tracks, a data sector already carries its own error
+ * detection/correction, so a single successful read of a sector is
+ * trusted; only outright read failures are retried. */
 static int cyanrip_rip_data_track(cyanrip_ctx *ctx, cyanrip_track *t)
 {
     int ret = 0;
     int line_len = 0;
     char line[4096];
-    uint8_t sector[CDIO_CD_FRAMESIZE_RAW];
+    uint8_t sector[CDIO_CD_FRAMESIZE];
 
     FILE *binfps[CYANRIP_FORMATS_NB] = { NULL };
 
@@ -752,10 +754,13 @@ static int cyanrip_rip_data_track(cyanrip_ctx *ctx, cyanrip_track *t)
         driver_return_code_t drc;
         int tries = 0;
         do {
-            drc = cyanrip_read_data_sector(ctx->cdio, sector, lsn);
-        } while (drc != DRIVER_OP_SUCCESS && ++tries < ctx->settings.max_retries);
+            /* Some drivers (e.g. libcdio's generic Linux one) return the
+             * raw byte count read on success rather than DRIVER_OP_SUCCESS;
+             * every actual error is a negative driver_return_code_t value. */
+            drc = cdio_read_mode1_sectors(ctx->cdio, sector, lsn, false, 1);
+        } while (drc < 0 && ++tries < ctx->settings.max_retries);
 
-        if (drc != DRIVER_OP_SUCCESS) {
+        if (drc < 0) {
             cyanrip_log(ctx, 0, "\nRead error at LSN %i, filling with zeroes!\n", lsn);
             memset(sector, 0, sizeof(sector));
             ctx->total_error_count++;

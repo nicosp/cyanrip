@@ -92,8 +92,8 @@ void cyanrip_log_track_end(cyanrip_ctx *ctx, cyanrip_track *t)
 
     if (t->track_is_data) {
         cyanrip_log(ctx, 0, "    Data bytes:  %i (%.2f Mib)\n",
-                    t->frames*CDIO_CD_FRAMESIZE_RAW,
-                    t->frames*CDIO_CD_FRAMESIZE_RAW / (1024.0 * 1024.0));
+                    t->frames*CDIO_CD_FRAMESIZE,
+                    t->frames*CDIO_CD_FRAMESIZE / (1024.0 * 1024.0));
         cyanrip_log(ctx, 0, "    Frames:      %u\n", t->end_lsn_sig - t->start_lsn_sig + 1);
         print_offsets(ctx, t);
         if (t->computed_crcs)

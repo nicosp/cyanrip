@@ -364,21 +364,9 @@ Custom changes in the way pregaps are handled will be reflected in the CUE file.
 
 Data tracks
 -----------
-Some discs (Enhanced CD, CD-Extra, Mixed Mode) carry a data track alongside the audio, typically holding bonus videos, a multimedia application, or a bootable/game data session. cyanrip detects this automatically and, instead of decoding/encoding it, dumps it as-is to a `.bin` file, referenced from the CUE sheet as a `MODE1/2352` `BINARY` track.
+Some discs (Enhanced CD, CD-Extra, Mixed Mode) carry a data track alongside the audio, typically holding bonus videos, a multimedia application, or a bootable/game data session. cyanrip detects this automatically and, instead of decoding/encoding it, dumps its 2048 bytes of user data per sector to an `.iso` file, referenced from the CUE sheet as a `MODE1/2048` `BINARY` track.
 
-The `.bin` is a raw sector dump: each 2352-byte sector is copied verbatim (sync bytes, header, the 2048 bytes of real data, and the EDC/ECC bytes), exactly like a `.bin`/`.cue` image from other ripping tools. This is deliberate: it preserves the track exactly as it is on the disc, including anything a "cooked" read would discard or fail to reproduce (non-standard sectors, damaged or intentionally malformed data, etc.), the same preservation-first approach cyanrip takes with audio.
-
-Because of that, the `.bin` isn't directly mountable or browsable as-is — you first need to turn it into a plain ISO9660 image by dropping the per-sector overhead. The easiest way is a dedicated bin/cue tool that understands the CUE sheet directly, e.g. `bchunk` on Linux, or PowerISO/UltraISO/IsoBuster on Windows, which will produce a normal `.iso` (or let you mount the `.bin`/`.cue` pair directly as a virtual drive).
-
-If you'd rather do it by hand, each sector only needs its first 16 bytes (sync + header) and last 288 bytes (EDC/ECC) stripped, keeping the 2048 bytes in between:
-
-```python
-with open("track.bin", "rb") as f, open("track.iso", "wb") as out:
-    while (sector := f.read(2352)):
-        out.write(sector[16:16 + 2048])
-```
-
-The resulting `track.iso` is a standard ISO9660 image, and can be mounted or extracted with any regular tool (`mount -o loop`, `xorriso`, `7z`, `bsdtar`, etc.).
+The resulting `.iso` is a standard, directly mountable ISO9660 image — no conversion needed, just `mount -o loop`, or any of the usual archive tools (`xorriso`, `7z`, `bsdtar`, etc.). This assumes the track is made up of plain Mode 1 Form 1 sectors, which covers essentially every Enhanced CD/CD-Extra data session in practice.
 
 
 Links

@@ -62,12 +62,6 @@ sources = [
                       fallback: 'release')
 ]
 
-if host_machine.system() == 'darwin'
-    sources += 'data_read_macos.c'
-else
-    sources += 'data_read_mmc.c'
-endif
-
 
 # Optional, for printing MusicBrainz submission URLs as QR codes
 qrencode = dependency('libqrencode', version: '>= 4.0', required: false,

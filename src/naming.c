@@ -415,7 +415,7 @@ char *crip_get_path(cyanrip_ctx *ctx, enum CRIPPathType type, int create_dirs,
         if (process_cond(ctx, &buf, t->meta, fmt->name,
                          ctx->settings.track_name_scheme))
             goto end;
-        ext = av_strdup(t->track_is_data ? "bin" : fmt->ext);
+        ext = av_strdup(t->track_is_data ? "iso" : fmt->ext);
     }
 
     if (ext)
