@@ -692,10 +692,9 @@ static int cyanrip_append_progress_eta(cyanrip_ctx *ctx, char *line, size_t line
 }
 
 /* Reads a data track sector by sector via cdio_read_mode1_sectors(),
- * writing the 2048 bytes of user data per sector (as declared by the CUE
- * sheet's MODE1/2048) to an .iso file. This assumes the track is made up
- * of plain Mode 1 Form 1 sectors; it does not preserve the sync/header/
- * EDC-ECC bytes, but reads identically on every platform libcdio supports.
+ * writing the 2048 bytes of user data per sector to an .iso file.
+ * It does not preserve the sync/header/EDC-ECC bytes.
+ *
  * Unlike audio tracks, a data sector already carries its own error
  * detection/correction, so a single successful read of a sector is
  * trusted; only outright read failures are retried. */
