@@ -62,7 +62,6 @@ sources = [
                       fallback: 'release')
 ]
 
-
 # Optional, for printing MusicBrainz submission URLs as QR codes
 qrencode = dependency('libqrencode', version: '>= 4.0', required: false,
                       static: static_build)
