@@ -293,19 +293,20 @@ static void check_true(const char *what, int cond)
 int main(void)
 {
     /* First track: nothing precedes it to hold a pregap, so there is no
-     * boundary to search and no subq work to do - the pregap, if any, is
-     * simply the gap between the disc's start and the track's start. */
+     * boundary to search and no subq work to do - its pregap is always the
+     * disc's start, so that the lead-in is reported, even when the track
+     * begins there and the pregap is therefore empty. */
     {
         fake_disc_t d = make_disc(1000, 1150, 1300);
         d.cur_track_number = d.first_track_num;
         d.ctx_start_lsn = d.cur_track_start_lsn; /* no lead-in gap */
         lsn_t got = run(&d);
-        check_lsn("first track, no lead-in gap", got, CDIO_INVALID_LSN);
+        check_lsn("first track, no lead-in gap", got, d.ctx_start_lsn);
         check_true("first track, no lead-in gap: no subq reads", d.reads_issued == 0);
     }
 
-    /* First track with a lead-in gap (e.g. a hidden track before it): report
-     * the disc's start as the pregap, still without any subq work. */
+    /* First track with a lead-in gap (e.g. a hidden track before it): the
+     * disc's start is the pregap, still without any subq work. */
     {
         fake_disc_t d = make_disc(1000, 1150, 1300);
         d.cur_track_number = d.first_track_num;
