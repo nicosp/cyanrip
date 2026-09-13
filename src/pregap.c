@@ -30,7 +30,7 @@
 /*
  * The maximum number of retries for a single sector read before giving up on that sector.
  * Based on XLD's pregap search, which uses 5 retries per sector.
- * 
+ *
  * We might want to make this configurable in the future.
 */
 #define SECTOR_MAX_RETRIES 5
@@ -122,7 +122,7 @@ static void subq_bcd_fixup(uint8_t *subq_buf)
 
 /**
  * Reads Q sub-channel sector and validates its CRC, converting to BCD if needed.
- * 
+ *
  * The BCD conversion is a workround for drives that return raw binary values instead of BCD.
  *
  * Returns DRIVER_OP_SUCCESS if the sector is valid, DRIVER_OP_ERROR for CRC mismatch,
@@ -169,13 +169,13 @@ static driver_return_code_t subq_read_valid_audio_sector(cyanrip_ctx *ctx, uint8
 /**
  * Reads the Q sub-channel with retries, returning on the first successful read or the last error.
  * Increments total_failures for each failed read attempt.
- * 
+ *
  * audio_subq_buf must be at least CDIO_CD_FRAMESIZE_RAW + SUBQ_SIZE bytes.
  */
 static driver_return_code_t subq_read_with_retries(cyanrip_ctx *ctx, uint8_t *audio_subq_buf,
     subq_t *subq, const lsn_t lsn, int *total_failures)
 {
-    driver_return_code_t ret; 
+    driver_return_code_t ret;
     int retry = 0;
 
     while (retry < SECTOR_MAX_RETRIES) {
@@ -249,7 +249,7 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
 
     /* Previous track is a single sector. No pregap */
     if (prev_track_start_lsn + 1 == track_start_lsn)
-        return CDIO_INVALID_LSN;
+        return track_start_lsn;
 
     uint8_t *audio_subq_buf = av_malloc(CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ);
 
