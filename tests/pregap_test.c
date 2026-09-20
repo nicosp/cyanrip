@@ -82,6 +82,7 @@ typedef struct {
     track_format_t cur_track_format;
     int simulate_libcdio_pregap_support;
     int nonbcd;
+    int q_offset; /* Q sub-channel runs this many sectors ahead of the TOC */
     lsn_t ctx_start_lsn; /* fed to cyanrip_ctx.start_lsn in run(); only matters for the first track */
 
     lsn_fault_t faults[MAX_FAULTS];
@@ -178,7 +179,7 @@ driver_return_code_t cyanrip_read_audio_subq_sector(const CdIo_t *p_cdio, uint8_
         break;
     }
 
-    lsn_t content_lsn = lsn;
+    lsn_t content_lsn = lsn + d->q_offset;
     for (int i = 0; i < d->num_jitter; i++) {
         if (d->jitter[i].lsn == lsn) {
             content_lsn = d->jitter[i].reports_as;
@@ -430,6 +431,27 @@ int main(void)
         make_disc(&d, 1000, 1299, 1300);
         lsn_t got = run(&d);
         check_lsn("one sector pregap", got, 1299);
+    }
+
+    /* No pregap, but the Q sub-channel runs ahead of the TOC, so the sectors
+     * just below the track start already report the new track. They carry
+     * index 1, not index 0: that is the track itself, not a pregap. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1300, 1300);
+        d.q_offset = 2;
+        lsn_t got = run(&d);
+        check_lsn("no pregap, Q ahead of the TOC", got, CDIO_INVALID_LSN);
+    }
+
+    /* Same drive/disc skew with a real pregap: the index 0 sectors are still
+     * found, where the Q sub-channel reports them. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
+        d.q_offset = 2;
+        lsn_t got = run(&d);
+        check_lsn("pregap, Q ahead of the TOC", got, 1148);
     }
 
     /* A dead sector in the middle of a long scanned range: the shrinking loop

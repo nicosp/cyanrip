@@ -209,6 +209,11 @@ static inline int subq_read_failure_is_skippable(driver_return_code_t ret, int t
  * The LSN is found by a search that narrows two bounds between the previous track's start and this one's:
  *     left_bound  - highest sector known to still be in the previous track
  *     right_bound - lowest sector known to already be in the new track
+ *
+ * Only sectors of the new track carrying index 0 are pregap. The Q sub-channel
+ * often runs a few sectors ahead of the TOC, so sectors just below the track
+ * start may already report index 1: those belong to the track itself and are
+ * never reported as a pregap.
  */
 lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
 {
@@ -263,6 +268,10 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
      * track. See the algorithm description in the doc comment above. */
     lsn_t left_bound = prev_track_start_lsn;
     lsn_t right_bound = track_start_lsn;
+
+    /* Whether the sector at right_bound has index 0, i.e. is pregap rather
+     * than the track itself. The track start is not. */
+    int right_bound_is_pregap = 0;
 
     /* Step 1: is there a pregap at all? The sector below the track start,
      * confirmed by the sector below that, answers it. */
@@ -324,19 +333,23 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
             continue;
 
         /* Confirm with the very next sector before trusting this jump
-         * landed inside the pregap rather than on a spuriously
+         * landed inside the new track rather than on a spuriously
          * CRC-valid read of the wrong sector. */
+        const int is_pregap = subq.index_number == 0;
         const lsn_t confirm_lsn = lsn + 1;
         if (confirm_lsn >= track_start_lsn) {
             /* track_start_lsn is known to belong to the new track already. */
             right_bound = lsn;
+            right_bound_is_pregap = is_pregap;
             continue;
         }
         ret = subq_read_with_retries(ctx, audio_subq_buf, &subq, confirm_lsn, &total_failures);
         if (ret && !subq_read_failure_is_skippable(ret, total_failures))
             goto fail;
-        if (!ret && subq.adr == 1 && subq.track_number == track_number)
+        if (!ret && subq.adr == 1 && subq.track_number == track_number) {
             right_bound = lsn;
+            right_bound_is_pregap = is_pregap;
+        }
     }
     left_bound = lsn;
 
@@ -348,6 +361,7 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
     assert(right_bound <= track_start_lsn);
     assert(lsn == left_bound);
     lsn_t right_bound_candidate = CDIO_INVALID_LSN;
+    int right_bound_candidate_is_pregap = 0;
     while ((left_bound + 1) != right_bound) {
         lsn += 1;
         if (lsn == right_bound) {
@@ -388,15 +402,18 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
             /* Require two consecutive sectors reporting the new track number
              * before contracting right bound: guards against a single
              * spuriously CRC-valid read of the wrong physical sector. */
-            if (right_bound_candidate == lsn - 1)
+            if (right_bound_candidate == lsn - 1) {
                 right_bound = lsn - 1;
-            else if (lsn + 1 == right_bound)
+                right_bound_is_pregap = right_bound_candidate_is_pregap;
+            } else if (lsn + 1 == right_bound) {
                 /* right_bound is itself an established new-track sector, so it
                  * serves as the second of the two consecutive reads. Without
                  * this, a pregap one sector long could never be confirmed. */
                 right_bound = lsn;
-            else {
+                right_bound_is_pregap = subq.index_number == 0;
+            } else {
                 right_bound_candidate = lsn;
+                right_bound_candidate_is_pregap = subq.index_number == 0;
                 continue;
             }
             right_bound_candidate = CDIO_INVALID_LSN;
@@ -412,7 +429,10 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
         av_free(audio_subq_buf);
         return CDIO_INVALID_LSN;
     }
-    lsn = right_bound;
+
+    /* The new track begins at right_bound, but unless that sector has index 0
+     * it is the track itself showing up ahead of the TOC, not a pregap. */
+    lsn = right_bound_is_pregap ? right_bound : CDIO_INVALID_LSN;
 
     av_free(audio_subq_buf);
     return lsn;
