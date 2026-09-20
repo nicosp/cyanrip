@@ -339,6 +339,16 @@ int main(void)
         check_true("no pregap: fast path used only 2 reads", d.reads_issued == 2);
     }
 
+    /* Previous track is a single sector: no room for a pregap, reported as
+     * CDIO_INVALID_LSN like any other absent pregap, without any subq work. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1299, 1300, 1300);
+        lsn_t got = run(&d);
+        check_lsn("single sector previous track", got, CDIO_INVALID_LSN);
+        check_true("single sector previous track: no subq reads", d.reads_issued == 0);
+    }
+
     /* Ordinary ~2s pregap. */
     {
         fake_disc_t d;

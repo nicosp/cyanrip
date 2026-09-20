@@ -37,8 +37,9 @@
 
 /* Overall budget on how many failed (CRC-invalid) reads we'll tolerate
  * across the whole search before giving up entirely, so that severely
- * damaged media near a track boundary can't stall ripping indefinitely
- * (XLD has an equivalent global cap).
+ * damaged media near a track boundary can't stall ripping indefinitely.
+ * XLD's cap of 100 only counts failures before its first valid read; this
+ * one covers the whole search.
  */
 #define TOTAL_FAILURE_BUDGET 100
 
@@ -254,7 +255,7 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
 
     /* Previous track is a single sector. No pregap */
     if (prev_track_start_lsn + 1 == track_start_lsn)
-        return track_start_lsn;
+        return CDIO_INVALID_LSN;
 
     uint8_t *audio_subq_buf = av_malloc(CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ);
 
