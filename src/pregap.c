@@ -357,66 +357,76 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
     /* Step 3: walk upwards from left_bound, moving the bounds closer together
      * on each sector that identifies itself, until they are adjacent. Sectors
      * that won't read are stepped over, in the hope that a good sector further
-     * along moves a bound past them and rules them out as the pregap start. */
+     * along moves a bound past them and rules them out as the pregap start.
+     *
+     * right_bound only contracts onto a sector reporting the new track once a
+     * second new-track sector above it agrees: guards against a single
+     * spuriously CRC-valid read of the wrong physical sector. The two don't
+     * have to be adjacent. Sectors in between that say nothing about the track
+     * (unreadable, or mode 2/3 Q frames) leave the candidate standing; only a
+     * sector reporting the previous track throws it out. */
     assert(left_bound >= prev_track_start_lsn);
     assert(right_bound <= track_start_lsn);
     assert(lsn == left_bound);
     lsn_t right_bound_candidate = CDIO_INVALID_LSN;
     int right_bound_candidate_is_pregap = 0;
     while ((left_bound + 1) != right_bound) {
+        int confirmed = 0;
+
         lsn += 1;
         if (lsn == right_bound) {
-            /* Walked all the way up to right_bound without the bounds meeting,
-             * so unreadable sectors are all that is left between them and
-             * there is no way to tell which one starts the pregap. Give up. */
-            break;
-        }
-        ret = subq_read_with_retries(ctx, audio_subq_buf, &subq, lsn, &total_failures);
-        if (ret) {
-            /* Leave both bounds where they are and step over this sector: a
-             * later good read can still rule it out by moving a bound past it. */
-            if (subq_read_failure_is_skippable(ret, total_failures))
-                continue;
-            goto fail;
-        }
+            /* Walked all the way up to right_bound without the bounds meeting
+             * and with no candidate: unreadable sectors are all that is left
+             * between them and there is no way to tell which one starts the
+             * pregap. Give up. */
+            if (right_bound_candidate == CDIO_INVALID_LSN)
+                break;
 
-        if (subq.adr != 1) {
-            /* Mode 2 and mode 3 Q frames carry the catalogue number or ISRC
-             * instead of a position, so they can't say which track they are
-             * in. One sitting directly above left_bound is taken as part of
-             * the previous track, on the assumption that a pregap doesn't
-             * begin on one; anywhere else it is stepped over like a sector
-             * that wouldn't read. */
-            if (lsn - 1 == left_bound) {
+            /* right_bound is itself an established new-track sector, so it
+             * serves as the second read confirming the candidate. Without
+             * this, a pregap one sector long could never be confirmed. */
+            confirmed = 1;
+        } else {
+            ret = subq_read_with_retries(ctx, audio_subq_buf, &subq, lsn, &total_failures);
+            if (ret) {
+                /* Leave both bounds where they are and step over this sector: a
+                 * later good read can still rule it out by moving a bound past it. */
+                if (subq_read_failure_is_skippable(ret, total_failures))
+                    continue;
+                goto fail;
+            }
+
+            if (subq.adr != 1) {
+                /* Mode 2 and mode 3 Q frames carry the catalogue number or ISRC
+                 * instead of a position, so they can't say which track they are
+                 * in. One sitting directly above left_bound is taken as part of
+                 * the previous track, on the assumption that a pregap doesn't
+                 * begin on one; anywhere else it is stepped over like a sector
+                 * that wouldn't read. */
+                if (lsn - 1 == left_bound) {
+                    assert(right_bound_candidate == CDIO_INVALID_LSN);
+                    left_bound = lsn;
+                }
+            }
+            else if (subq.track_number == prev_track_number) {
                 assert(lsn >= left_bound);
                 left_bound = lsn;
                 right_bound_candidate = CDIO_INVALID_LSN;
             }
-        }
-        else if (subq.track_number == prev_track_number) {
-            assert(lsn >= left_bound);
-            left_bound = lsn;
-            right_bound_candidate = CDIO_INVALID_LSN;
-        }
-        else if (subq.track_number == track_number) {
-            assert(lsn <= right_bound);
-            /* Require two consecutive sectors reporting the new track number
-             * before contracting right bound: guards against a single
-             * spuriously CRC-valid read of the wrong physical sector. */
-            if (right_bound_candidate == lsn - 1) {
-                right_bound = lsn - 1;
-                right_bound_is_pregap = right_bound_candidate_is_pregap;
-            } else if (lsn + 1 == right_bound) {
-                /* right_bound is itself an established new-track sector, so it
-                 * serves as the second of the two consecutive reads. Without
-                 * this, a pregap one sector long could never be confirmed. */
-                right_bound = lsn;
-                right_bound_is_pregap = subq.index_number == 0;
-            } else {
-                right_bound_candidate = lsn;
-                right_bound_candidate_is_pregap = subq.index_number == 0;
-                continue;
+            else if (subq.track_number == track_number) {
+                assert(lsn <= right_bound);
+                if (right_bound_candidate == CDIO_INVALID_LSN) {
+                    right_bound_candidate = lsn;
+                    right_bound_candidate_is_pregap = subq.index_number == 0;
+                } else {
+                    confirmed = 1;
+                }
             }
+        }
+
+        if (confirmed) {
+            right_bound = right_bound_candidate;
+            right_bound_is_pregap = right_bound_candidate_is_pregap;
             right_bound_candidate = CDIO_INVALID_LSN;
             /* Rescan the narrowed range from the left bound. */
             lsn = left_bound;

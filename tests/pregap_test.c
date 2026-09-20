@@ -60,6 +60,7 @@ static int fails = 0;
 
 #define MAX_FAULTS 24
 #define MAX_JITTER 4
+#define MAX_MODE2 4
 
 typedef struct {
     lsn_t lsn;
@@ -89,6 +90,8 @@ typedef struct {
     int num_faults;
     lsn_jitter_t jitter[MAX_JITTER];
     int num_jitter;
+    lsn_t mode2[MAX_MODE2]; /* sectors whose Q frame is mode 2 (catalogue number): no position data */
+    int num_mode2;
 
     int reads_issued;
 } fake_disc_t;
@@ -193,6 +196,14 @@ driver_return_code_t cyanrip_read_audio_subq_sector(const CdIo_t *p_cdio, uint8_
 
     /* control=0b0001 (2ch audio, no pre-emphasis), adr=1 (position data) */
     q[0] = (0x1 << 4) | 0x1;
+    for (int i = 0; i < d->num_mode2; i++) {
+        if (d->mode2[i] == lsn) {
+            /* adr=2: the fields below stand in for the catalogue number
+             * digits, all pregap.c may look at is the adr and the CRC. */
+            q[0] = (0x1 << 4) | 0x2;
+            break;
+        }
+    }
     q[1] = bin_to_bcd(true_track);
     q[2] = bin_to_bcd(true_index);
     q[3] = bin_to_bcd(0);
@@ -462,6 +473,65 @@ int main(void)
         d.q_offset = 2;
         lsn_t got = run(&d);
         check_lsn("pregap, Q ahead of the TOC", got, 1148);
+    }
+
+    /* A mode 2 Q frame (catalogue number) on the second sector of the pregap:
+     * it can't confirm the first one, but it doesn't contradict it either, so
+     * the next sector reporting the new track still does. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
+        d.mode2[0] = 1151;
+        d.num_mode2 = 1;
+        lsn_t got = run(&d);
+        check_lsn("mode 2 Q frame right after the boundary", got, 1150);
+    }
+
+    /* Same with a permanently unreadable sector there, and with both kinds
+     * back to back. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
+        d.faults[0] = (lsn_fault_t){ .lsn = 1151, .remaining = -1 };
+        d.num_faults = 1;
+        lsn_t got = run(&d);
+        check_lsn("dead sector right after the boundary", got, 1150);
+    }
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
+        d.mode2[0] = 1151;
+        d.num_mode2 = 1;
+        d.faults[0] = (lsn_fault_t){ .lsn = 1152, .remaining = -1 };
+        d.num_faults = 1;
+        lsn_t got = run(&d);
+        check_lsn("mode 2 Q frame and dead sector right after the boundary", got, 1150);
+    }
+
+    /* A two sector pregap whose second sector is dead: the track start is an
+     * established new-track sector and confirms the first one across it. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1298, 1300);
+        d.faults[0] = (lsn_fault_t){ .lsn = 1299, .remaining = -1 };
+        d.num_faults = 1;
+        lsn_t got = run(&d);
+        check_lsn("two sector pregap, second one dead", got, 1298);
+    }
+
+    /* Tolerating silent sectors after a candidate must not let a spurious
+     * read through: the previous-track sectors that follow still reject it. */
+    {
+        fake_disc_t d;
+        make_disc(&d, 1000, 1300, 1500);
+        d.jitter[0] = (lsn_jitter_t){ .lsn = 1250, .reports_as = 1305 };
+        d.num_jitter = 1;
+        d.faults[0] = (lsn_fault_t){ .lsn = 1251, .remaining = -1 };
+        d.num_faults = 1;
+        d.mode2[0] = 1252;
+        d.num_mode2 = 1;
+        lsn_t got = run(&d);
+        check_lsn("spurious read followed by silent sectors is not trusted", got, 1300);
     }
 
     /* A dead sector in the middle of a long scanned range: the shrinking loop
