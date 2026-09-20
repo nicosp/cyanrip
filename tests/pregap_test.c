@@ -97,19 +97,17 @@ typedef struct {
  * one scenario is ever in flight at a time. */
 static fake_disc_t *g_disc;
 
-static fake_disc_t make_disc(lsn_t prev_start, lsn_t pregap_start, lsn_t cur_start)
+static void make_disc(fake_disc_t *d, lsn_t prev_start, lsn_t pregap_start, lsn_t cur_start)
 {
-    fake_disc_t d;
-    memset(&d, 0, sizeof(d));
-    d.first_track_num = 1;
-    d.prev_track_number = 5;
-    d.cur_track_number = 6;
-    d.prev_track_start_lsn = prev_start;
-    d.cur_pregap_start_lsn = pregap_start;
-    d.cur_track_start_lsn = cur_start;
-    d.prev_track_format = TRACK_FORMAT_AUDIO;
-    d.cur_track_format = TRACK_FORMAT_AUDIO;
-    return d;
+    memset(d, 0, sizeof(*d));
+    d->first_track_num = 1;
+    d->prev_track_number = 5;
+    d->cur_track_number = 6;
+    d->prev_track_start_lsn = prev_start;
+    d->cur_pregap_start_lsn = pregap_start;
+    d->cur_track_start_lsn = cur_start;
+    d->prev_track_format = TRACK_FORMAT_AUDIO;
+    d->cur_track_format = TRACK_FORMAT_AUDIO;
 }
 
 /* ---- Q sub-channel fixture generation: duplicates pregap.c's CRC-16 and BCD
@@ -297,7 +295,8 @@ int main(void)
      * disc's start, so that the lead-in is reported, even when the track
      * begins there and the pregap is therefore empty. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.cur_track_number = d.first_track_num;
         d.ctx_start_lsn = d.cur_track_start_lsn; /* no lead-in gap */
         lsn_t got = run(&d);
@@ -308,7 +307,8 @@ int main(void)
     /* First track with a lead-in gap (e.g. a hidden track before it): the
      * disc's start is the pregap, still without any subq work. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.cur_track_number = d.first_track_num;
         d.ctx_start_lsn = 0;
         lsn_t got = run(&d);
@@ -319,7 +319,8 @@ int main(void)
     /* libcdio already knows the pregap (e.g. a cue sheet): use it directly,
      * no subq reads needed at all. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.simulate_libcdio_pregap_support = 1;
         lsn_t got = run(&d);
         check_lsn("libcdio-reported pregap", got, 1150);
@@ -330,7 +331,8 @@ int main(void)
      * report the absence as CDIO_INVALID_LSN rather than as a zero length
      * pregap sitting on the track start. */
     {
-        fake_disc_t d = make_disc(1000, 1300, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1300, 1300);
         lsn_t got = run(&d);
         check_lsn("no pregap", got, CDIO_INVALID_LSN);
         check_true("no pregap: fast path used only 2 reads", d.reads_issued == 2);
@@ -338,14 +340,16 @@ int main(void)
 
     /* Ordinary ~2s pregap. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         lsn_t got = run(&d);
         check_lsn("short pregap", got, 1150);
     }
 
     /* Long pregap spanning several 150-sector backtrack jumps. */
     {
-        fake_disc_t d = make_disc(1000, 1500, 2000);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1500, 2000);
         lsn_t got = run(&d);
         check_lsn("long pregap", got, 1500);
     }
@@ -353,14 +357,16 @@ int main(void)
     /* Data track adjacent to the boundary: must bail out immediately
      * without doing any subq work at all. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.cur_track_format = TRACK_FORMAT_DATA;
         lsn_t got = run(&d);
         check_lsn("data track guard (current)", got, CDIO_INVALID_LSN);
         check_true("data track guard (current): no subq reads", d.reads_issued == 0);
     }
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.prev_track_format = TRACK_FORMAT_DATA;
         lsn_t got = run(&d);
         check_lsn("data track guard (previous)", got, CDIO_INVALID_LSN);
@@ -370,7 +376,8 @@ int main(void)
     /* A drive whose firmware returns raw binary MSF fields instead of BCD
      * must still resolve the pregap correctly once the quirk is detected. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.nonbcd = 1;
         lsn_t got = run(&d);
         check_lsn("non-BCD drive quirk", got, 1150);
@@ -381,7 +388,8 @@ int main(void)
      * right after it will contradict it and the search must still land on
      * the true boundary, not the jittered one. */
     {
-        fake_disc_t d = make_disc(1000, 1300, 1500);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1300, 1500);
         d.jitter[0] = (lsn_jitter_t){ .lsn = 1250, .reports_as = 1305 };
         d.num_jitter = 1;
         lsn_t got = run(&d);
@@ -393,7 +401,8 @@ int main(void)
      * backtracking it would anchor the left bound inside the pregap and the
      * search would silently converge on a wrong, too-late boundary. */
     {
-        fake_disc_t d = make_disc(1000, 1100, 2000);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1100, 2000);
         d.jitter[0] = (lsn_jitter_t){ .lsn = 1249, .reports_as = 1050 };
         d.num_jitter = 1;
         lsn_t got = run(&d);
@@ -405,7 +414,8 @@ int main(void)
      * both on a backtrack landing spot and inside the range the shrinking loop
      * scans, so both have to tolerate it. */
     {
-        fake_disc_t d = make_disc(1000, 1200, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1200, 1300);
         d.faults[0] = (lsn_fault_t){ .lsn = 1149, .remaining = -1 };
         d.num_faults = 1;
         lsn_t got = run(&d);
@@ -416,7 +426,8 @@ int main(void)
      * the boundary is the track start itself, which is already known to belong
      * to the new track and must count as the confirmation. */
     {
-        fake_disc_t d = make_disc(1000, 1299, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1299, 1300);
         lsn_t got = run(&d);
         check_lsn("one sector pregap", got, 1299);
     }
@@ -424,7 +435,8 @@ int main(void)
     /* A dead sector in the middle of a long scanned range: the shrinking loop
      * has to step over it and rule it out by moving the left bound past it. */
     {
-        fake_disc_t d = make_disc(1000, 1500, 2000);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1500, 2000);
         d.faults[0] = (lsn_fault_t){ .lsn = 1450, .remaining = -1 };
         d.num_faults = 1;
         lsn_t got = run(&d);
@@ -434,7 +446,8 @@ int main(void)
     /* A flaky sector right at the boundary that fails a few times before
      * succeeding: retries must recover the correct answer. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.faults[0] = (lsn_fault_t){ .lsn = 1150, .remaining = 3 };
         d.num_faults = 1;
         lsn_t got = run(&d);
@@ -444,7 +457,8 @@ int main(void)
     /* The exact boundary sector is permanently unreadable: the algorithm
      * must give up gracefully (CDIO_INVALID_LSN), not hang or crash. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.faults[0] = (lsn_fault_t){ .lsn = 1150, .remaining = -1 };
         d.num_faults = 1;
         lsn_t got = run(&d);
@@ -455,7 +469,8 @@ int main(void)
      * overall failure budget must cut the search short (bounded read count)
      * rather than burning through up to 200 retries on every one of them. */
     {
-        fake_disc_t d = make_disc(1000, 1150, 1300);
+        fake_disc_t d;
+        make_disc(&d, 1000, 1150, 1300);
         d.num_faults = MAX_FAULTS;
         for (int i = 0; i < MAX_FAULTS; i++)
             d.faults[i] = (lsn_fault_t){ .lsn = 1140 + i, .remaining = -1 };
