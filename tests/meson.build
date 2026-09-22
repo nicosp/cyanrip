@@ -24,7 +24,7 @@ naming_test = executable('naming_test',
 )
 test('Naming schemes', naming_test)
 
-## pregap_test defines its own cdio_get_*()/cyanrip_read_audio_subq_sectors()
+## pregap_test defines its own cdio_get_*()/cyanrip_read_audio_subchannel_sector()
 ## (see pregap_test.c) to drive pregap.c and subq_read.c against a synthetic disc, so it must
 ## not link the real libcdio/libcdio_paranoia - only their headers, for types.
 pregap_test_deps = [
