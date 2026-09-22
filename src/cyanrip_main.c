@@ -1104,6 +1104,10 @@ static void setup_track_offsets_and_report(cyanrip_ctx *ctx)
             nt->merged_pregap_end = CDIO_INVALID_LSN;
             nt->start_lsn = ct->pregap_lsn;
             nt->end_lsn = ct->start_lsn - 1;
+            /* The signature positions are what the log and CUE sheet report;
+             * the offset-adjusted ones above get shifted later on. */
+            nt->start_lsn_sig = nt->start_lsn;
+            nt->end_lsn_sig = nt->end_lsn;
             nt->cd_track_number = ct->cd_track_number;
 
             ct->pregap_lsn = CDIO_INVALID_LSN;
