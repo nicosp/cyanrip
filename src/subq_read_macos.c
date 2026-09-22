@@ -23,20 +23,27 @@
 #include <sys/errno.h>
 #include <cdio/cdio.h>
 
-driver_return_code_t cyanrip_read_audio_subq_sector(const CdIo_t *p_cdio, uint8_t *audio_subq_buf, const lsn_t lsn)
+driver_return_code_t cyanrip_read_audio_subchannel_sector(const CdIo_t *p_cdio, uint8_t *buf, const lsn_t lsn,
+                                                          enum cyanrip_subchannel subchannel, size_t block_size)
 {
+    uint8_t sector_area;
+    switch (subchannel) {
+    case CYANRIP_SUBCHANNEL_Q:      sector_area = kCDSectorAreaSubChannelQ; break;
+    case CYANRIP_SUBCHANNEL_PW_RAW: sector_area = kCDSectorAreaSubChannel;  break;
+    default:                        return DRIVER_OP_BAD_PARAMETER;
+    }
+
     const int fd = cdio_get_device_fd((CdIo_t *)p_cdio);
     if (fd < 0) {
         return DRIVER_OP_ERROR;
     }
 
-    const unsigned block_size = CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ;
     dk_cd_read_t cd_read = {
         .offset = block_size*lsn,
-        .sectorArea = kCDSectorAreaUser | kCDSectorAreaSubChannelQ,
+        .sectorArea = kCDSectorAreaUser | sector_area,
         .sectorType = kCDSectorTypeCDDA,
         .bufferLength = block_size,
-        .buffer = audio_subq_buf,
+        .buffer = buf,
     };
     if (ioctl(fd, DKIOCCDREAD, &cd_read) >= 0)
         return DRIVER_OP_SUCCESS;
