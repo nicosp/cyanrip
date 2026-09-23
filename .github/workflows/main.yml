@@ -9,8 +9,9 @@ on:
       - master
       - workflow
   release:
-    types: 
+    types:
       - released
+      - prereleased
   workflow_dispatch:
 
 jobs:
@@ -57,6 +58,8 @@ jobs:
 
   mingw:
     runs-on: windows-latest
+    permissions:
+      contents: write
     env:
       MSYSTEM: MINGW64
     defaults:
@@ -74,63 +77,17 @@ jobs:
           .github/mingw-build.sh
           zip cyanrip cyanrip.exe
 
-      - name: "Upload artifact"
-        if: github.ref == 'refs/heads/master' || github.event_name == 'release'
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cyanrip-${{ matrix.runs-on }}
+          name: cyanrip-win64
           path: cyanrip.exe
 
-      - name: Get Release
-        id: get_release
-        if: github.ref == 'refs/heads/master' || github.event_name == 'release'
+      - name: Upload the release asset
+        if: github.event_name == 'release'
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "::set-output name=upload_url_release::$(curl -sL https://api.github.com/repos/${{ github.repository }}/releases/tags/$(cut -d/ -f3 <<< ${{ github.ref }}) | jq -r ."upload_url")"
-          echo "::set-output name=upload_url_nightly::$(curl -sL https://api.github.com/repos/${{ github.repository }}/releases/tags/nightly | jq -r ."upload_url")"
-          echo "::set-output name=nightly_id::$(curl -sL https://api.github.com/repos/${{ github.repository }}/releases/tags/nightly | jq -r ."id")"
-
-      - name: Upload a Release Asset
-        if: steps.get_release.conclusion == 'success' && steps.get_release.outputs.upload_url_release != 'null'
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url_release }}
-          asset_path: ./cyanrip.exe
-          asset_name: cyanrip-win64.exe
-          asset_content_type: application/vnd.microsoft.portable-executable
-
-      - name: Upload versioned Nightly asset
-        if: steps.get_release.conclusion == 'success' && steps.get_release.outputs.upload_url_release == 'null' && steps.get_release.outputs.upload_url_nightly != 'null'
-        uses: WebFreak001/deploy-nightly@v1.1.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url_nightly }}
-          release_id: ${{ steps.get_release.outputs.nightly_id }}
-          asset_path: ./cyanrip.exe
-          asset_name: cyanrip-win64-$$.exe
-          asset_content_type: application/vnd.microsoft.portable-executable
-          max_releases: 4
-
-      - name: Delete existing nightly latest
-        id: del_nightly_release
-        if: steps.get_release.conclusion == 'success' && steps.get_release.outputs.upload_url_release == 'null' && steps.get_release.outputs.upload_url_nightly != 'null'
-        uses: mknejp/delete-release-assets@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: nightly
-          assets: cyanrip-win64-latest.exe
-          fail-if-no-assets: false
-
-      - name: Upload latest Nightly Asset
-        if: steps.del_nightly_release.conclusion == 'success' && steps.get_release.outputs.upload_url_nightly != 'null'
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url_nightly }}
-          asset_path: ./cyanrip.exe
-          asset_name: cyanrip-win64-latest.exe
-          asset_content_type: application/vnd.microsoft.portable-executable
+          cp cyanrip.exe cyanrip-win64.exe
+          gh release upload "${{ github.event.release.tag_name }}" cyanrip-win64.exe --clobber
