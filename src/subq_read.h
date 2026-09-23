@@ -50,8 +50,6 @@ enum cyanrip_subchannel {
  * CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ or CYANRIP_CD_FRAMESIZE_RAW_AND_SUBPW,
  * and buf must hold that many.
  *
- * Note: the Q frame still needs to be verified for CRC validity after reading.
- *
  * Returns DRIVER_OP_UNSUPPORTED where the backend can't read that sub-channel.
  */
 driver_return_code_t cyanrip_read_audio_subchannel_sector(const CdIo_t *p_cdio, uint8_t *buf, const lsn_t lsn,
