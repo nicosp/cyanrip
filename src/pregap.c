@@ -25,177 +25,9 @@
 #include <assert.h>
 
 #include <cdio/cdio.h>
-#include <cdio/mmc_ll_cmds.h>
 
-/*
- * The maximum number of retries for a single sector read before giving up on that sector.
- * Based on XLD's pregap search, which uses 5 retries per sector.
- *
- * We might want to make this configurable in the future.
-*/
-#define SECTOR_MAX_RETRIES 5
-
-/* Overall budget on how many failed (CRC-invalid) reads we'll tolerate
- * across the whole search before giving up entirely, so that severely
- * damaged media near a track boundary can't stall ripping indefinitely.
- * XLD's cap of 100 only counts failures before its first valid read; this
- * one covers the whole search.
- */
-#define TOTAL_FAILURE_BUDGET 100
-
-typedef struct subq_t {
-    uint8_t  control;
-    uint8_t  adr;
-    uint8_t  track_number;
-    uint8_t  index_number;
-    uint8_t  min;
-    uint8_t  sec;
-    uint8_t  frame;
-    uint8_t  amin;
-    uint8_t  asec;
-    uint8_t  aframe;
-    unsigned crc;
-} subq_t;
-
-static inline uint8_t bcd_to_bin(uint8_t x)
-{
-    return 10 * ((x & 0xF0) >> 4) + (x & 0x0F);
-}
-
-/* MMC-3 4.1.3.2.1. Q sub-channel Mode-1: "Bytes in the Q sub-channel that
- * contains bcd contents may also contain illegal BCD values. Then values start
- * with 0A0h and continue to 0FFh. No conversion of these to hex for
- * transmission to/from the initiator is performed."
- */
-static inline uint8_t subq_bcd_to_bin(uint8_t x)
-{
-    return x >= 0xA0 ? x : bcd_to_bin(x);
-}
-
-/* Calculate CRC for the Q sub-channel.
- * CRC-16/GSM with length 10
- */
-static inline unsigned int subq_crc(const uint8_t* subq_buf)
-{
-    int length = 10;
-    const unsigned crc_poly = 0x1021;
-    unsigned r = 0x0000;
-    while (length--) {
-        r ^= *subq_buf++ << 8;
-        for (int i = 0; i < 8; i++)
-            r = r & 0x8000 ? (r << 1) ^ crc_poly : r << 1;
-    }
-    return ~r & 0xFFFFU;
-}
-
-/**
- * Reads the CRC recorded in the Q sub-channel.
- */
-static inline unsigned int subq_read_crc(const uint8_t *subq_buf)
-{
-    return (subq_buf[10] << 8) | subq_buf[11];
-}
-
-/* MMC-3 Table 38 - Formatted Q sub-channel response data */
-static void subq_decode(subq_t *subq, const uint8_t *src)
-{
-    subq->control       = (src[0] & 0xF0) >> 4;
-    subq->adr           = (src[0] & 0x0F) >> 0;
-    subq->track_number  = subq_bcd_to_bin(src[1]);
-    subq->index_number  = subq_bcd_to_bin(src[2]);
-    subq->min           = subq_bcd_to_bin(src[3]);
-    subq->sec           = subq_bcd_to_bin(src[4]);
-    subq->frame         = subq_bcd_to_bin(src[5]);
-    subq->amin          = subq_bcd_to_bin(src[7]);
-    subq->asec          = subq_bcd_to_bin(src[8]);
-    subq->aframe        = subq_bcd_to_bin(src[9]);
-    subq->crc           = (src[10] << 8) | src[11];
-}
-
-static void subq_bcd_fixup(uint8_t *subq_buf)
-{
-    static const int fields[] = { 1, 2, 3, 4, 5, 7, 8, 9 };
-    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
-        uint8_t x = subq_buf[fields[i]];
-        subq_buf[fields[i]] = (uint8_t)(((x / 10) << 4) | (x % 10));
-    }
-}
-
-/**
- * Reads Q sub-channel sector and validates its CRC, converting to BCD if needed.
- *
- * The BCD conversion is a workround for drives that return raw binary values instead of BCD.
- *
- * Returns DRIVER_OP_SUCCESS if the sector is valid, DRIVER_OP_ERROR for CRC mismatch,
- * or another driver_return_code_t for other errors.
- */
-static driver_return_code_t subq_read_valid_audio_sector(cyanrip_ctx *ctx, uint8_t *audio_subq_buf, const lsn_t lsn)
-{
-    driver_return_code_t ret = cyanrip_read_audio_subq_sector(ctx->cdio, audio_subq_buf, lsn);
-    if (ret) {
-        return ret;
-    }
-
-    uint8_t *subq_buf = audio_subq_buf + CDIO_CD_FRAMESIZE_RAW;
-    if (ctx->subq_bcd_fixup_status == CYANRIP_BCD_FIXUP_REQUIRED) {
-        subq_bcd_fixup(subq_buf);
-
-        return (subq_read_crc(subq_buf) == subq_crc(subq_buf) ? DRIVER_OP_SUCCESS : DRIVER_OP_ERROR);
-    }
-
-    if (subq_read_crc(subq_buf) == subq_crc(subq_buf)) {
-        ctx->subq_bcd_fixup_status = CYANRIP_BCD_FIXUP_NOT_REQUIRED; /* We matched a CRC without the BCD fixup. Never apply BCD fixup to avoid false positives */
-        return DRIVER_OP_SUCCESS;
-    }
-
-    if (ctx->subq_bcd_fixup_status == CYANRIP_BCD_FIXUP_NOT_REQUIRED) {
-        return DRIVER_OP_ERROR;
-    }
-
-    /* CRC mismatch, try to fixup BCD and see if that works */
-    uint8_t subq_buf_copy[SUBQ_SIZE];
-    memcpy(subq_buf_copy, subq_buf, SUBQ_SIZE);
-    subq_bcd_fixup(subq_buf_copy);
-
-    if (subq_read_crc(subq_buf_copy) == subq_crc(subq_buf_copy)) {
-        ctx->subq_bcd_fixup_status = CYANRIP_BCD_FIXUP_REQUIRED;
-
-        memcpy(subq_buf, subq_buf_copy, SUBQ_SIZE);
-        return DRIVER_OP_SUCCESS;
-    }
-
-    return DRIVER_OP_ERROR;
-}
-
-/**
- * Reads the Q sub-channel with retries, returning on the first successful read or the last error.
- * Increments total_failures for each failed read attempt.
- *
- * audio_subq_buf must be at least CDIO_CD_FRAMESIZE_RAW + SUBQ_SIZE bytes.
- */
-static driver_return_code_t subq_read_with_retries(cyanrip_ctx *ctx, uint8_t *audio_subq_buf,
-    subq_t *subq, const lsn_t lsn, int *total_failures)
-{
-    driver_return_code_t ret;
-    int retry = 0;
-
-    while (retry < SECTOR_MAX_RETRIES) {
-        ret = subq_read_valid_audio_sector(ctx, audio_subq_buf, lsn);
-        if (ret == DRIVER_OP_SUCCESS) {
-            subq_decode(subq, audio_subq_buf + CDIO_CD_FRAMESIZE_RAW);
-            break;
-        }
-        (*total_failures)++;
-        retry++;
-
-        /* Abort if the read failure is not recoverable */
-        if (ret != DRIVER_OP_ERROR || *total_failures > TOTAL_FAILURE_BUDGET) {
-            break;
-        }
-    }
-
-    return ret;
-}
+/* How many sectors between the bounds the damaged-frame pass will look at. */
+#define SUBQ_DAMAGED_MAX_GAP 8
 
 /* Whether we can skip a subq read failure and continue searching for the pregap. */
 static inline int subq_read_failure_is_skippable(driver_return_code_t ret, int total_failures)
@@ -215,9 +47,20 @@ static inline int subq_read_failure_is_skippable(driver_return_code_t ret, int t
  * often runs a few sectors ahead of the TOC, so sectors just below the track
  * start may already report index 1: those belong to the track itself and are
  * never reported as a pregap.
+ *
+ * Drives hand back the Q of a sector a few sectors away from the one asked
+ * for. The search works in terms of the sectors it asks for, which puts the
+ * boundary off by as much. Each Q frame carries its own absolute time though,
+ * so once the boundary is found, the frame on it says where it really is.
  */
-lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
+lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number, cyanrip_pregap_info *info)
 {
+    cyanrip_pregap_info unused_info;
+    if (!info)
+        info = &unused_info;
+    memset(info, 0, sizeof(*info));
+    info->failed_lsn = CDIO_INVALID_LSN;
+
     /* Try to use libcdio. If libcdio doesn't implement pregap finding
        for a driver, it will return CDIO_INVALID_LSN. */
     const lsn_t cdio_track_pregap_lsn = cdio_get_track_pregap_lsn(ctx->cdio, track_number);
@@ -257,7 +100,11 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
     if (prev_track_start_lsn + 1 == track_start_lsn)
         return CDIO_INVALID_LSN;
 
-    uint8_t *audio_subq_buf = av_malloc(CYANRIP_CD_FRAMESIZE_RAW_AND_SUBQ);
+    uint8_t *audio_subq_buf = av_malloc(CYANRIP_CD_FRAMESIZE_RAW_AND_SUBPW);
+
+    /* Both tracks are audio by now, so anything from the previous track's
+     * start up to this track's start will do for the probe. */
+    subq_probe_read_mode(ctx, audio_subq_buf, prev_track_start_lsn, track_start_lsn);
 
     lsn_t lsn;
     subq_t subq;
@@ -273,6 +120,11 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
     /* Whether the sector at right_bound has index 0, i.e. is pregap rather
      * than the track itself. The track start is not. */
     int right_bound_is_pregap = 0;
+
+    /* The sectors the Q frames read at the bounds say they are from, or
+     * CDIO_INVALID_LSN when a bound doesn't rest on a mode 1 Q frame. */
+    lsn_t left_bound_abs_lsn = CDIO_INVALID_LSN;
+    lsn_t right_bound_abs_lsn = CDIO_INVALID_LSN;
 
     /* Step 1: is there a pregap at all? The sector below the track start,
      * confirmed by the sector below that, answers it. */
@@ -315,6 +167,8 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
             continue;
 
         if (subq.track_number == prev_track_number) {
+            left_bound_abs_lsn = subq_abs_lsn(&subq);
+
             /* Confirm with the sector below before trusting this as the left
              * bound. A single spuriously CRC-valid read of the wrong sector
              * here would put the left bound inside the pregap, and the search
@@ -337,11 +191,13 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
          * landed inside the new track rather than on a spuriously
          * CRC-valid read of the wrong sector. */
         const int is_pregap = subq.index_number == 0;
+        const lsn_t abs_lsn = subq_abs_lsn(&subq);
         const lsn_t confirm_lsn = lsn + 1;
         if (confirm_lsn >= track_start_lsn) {
             /* track_start_lsn is known to belong to the new track already. */
             right_bound = lsn;
             right_bound_is_pregap = is_pregap;
+            right_bound_abs_lsn = abs_lsn;
             continue;
         }
         ret = subq_read_with_retries(ctx, audio_subq_buf, &subq, confirm_lsn, &total_failures);
@@ -350,9 +206,12 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
         if (!ret && subq.adr == 1 && subq.track_number == track_number) {
             right_bound = lsn;
             right_bound_is_pregap = is_pregap;
+            right_bound_abs_lsn = abs_lsn;
         }
     }
     left_bound = lsn;
+    if (left_bound == prev_track_start_lsn)
+        left_bound_abs_lsn = CDIO_INVALID_LSN; /* rests on the TOC, not on a Q frame */
 
     /* Step 3: walk upwards from left_bound, moving the bounds closer together
      * on each sector that identifies itself, until they are adjacent. Sectors
@@ -370,6 +229,7 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
     assert(lsn == left_bound);
     lsn_t right_bound_candidate = CDIO_INVALID_LSN;
     int right_bound_candidate_is_pregap = 0;
+    lsn_t right_bound_candidate_abs_lsn = CDIO_INVALID_LSN;
     while ((left_bound + 1) != right_bound) {
         int confirmed = 0;
 
@@ -406,11 +266,13 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
                 if (lsn - 1 == left_bound) {
                     assert(right_bound_candidate == CDIO_INVALID_LSN);
                     left_bound = lsn;
+                    left_bound_abs_lsn = CDIO_INVALID_LSN;
                 }
             }
             else if (subq.track_number == prev_track_number) {
                 assert(lsn >= left_bound);
                 left_bound = lsn;
+                left_bound_abs_lsn = subq_abs_lsn(&subq);
                 right_bound_candidate = CDIO_INVALID_LSN;
             }
             else if (subq.track_number == track_number) {
@@ -418,6 +280,7 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
                 if (right_bound_candidate == CDIO_INVALID_LSN) {
                     right_bound_candidate = lsn;
                     right_bound_candidate_is_pregap = subq.index_number == 0;
+                    right_bound_candidate_abs_lsn = subq_abs_lsn(&subq);
                 } else {
                     confirmed = 1;
                 }
@@ -427,9 +290,44 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
         if (confirmed) {
             right_bound = right_bound_candidate;
             right_bound_is_pregap = right_bound_candidate_is_pregap;
+            right_bound_abs_lsn = right_bound_candidate_abs_lsn;
             right_bound_candidate = CDIO_INVALID_LSN;
             /* Rescan the narrowed range from the left bound. */
             lsn = left_bound;
+        }
+    }
+
+    /* Step 4: only sectors that wouldn't read are left between the bounds.
+     * Their Q frames failed the CRC, but if their payload survived they can
+     * still close the gap: a sector reporting the previous track directly
+     * above left_bound extends it, a sector reporting the new track directly
+     * below right_bound extends that. Neither may leapfrog the other. */
+    int nb_damaged_used = 0, nb_repaired = 0, repaired;
+    if (left_bound + 1 != right_bound && right_bound - left_bound - 1 <= SUBQ_DAMAGED_MAX_GAP) {
+        while (left_bound + 1 != right_bound) {
+            lsn = left_bound + 1;
+            if (!subq_read_damaged(ctx, audio_subq_buf, &subq, lsn, prev_track_number, track_number, &repaired))
+                break;
+            if (subq.track_number != prev_track_number)
+                break;
+            left_bound = lsn;
+            left_bound_abs_lsn = lsn;
+            nb_damaged_used++;
+            nb_repaired += repaired;
+        }
+        while (left_bound + 1 != right_bound) {
+            lsn = right_bound - 1;
+            if (!subq_read_damaged(ctx, audio_subq_buf, &subq, lsn, prev_track_number, track_number, &repaired))
+                break;
+            const int is_pregap = subq.index_number == 0;
+            /* The index can't drop back to 0 once the track proper has begun */
+            if (subq.track_number != track_number || (right_bound_is_pregap && !is_pregap))
+                break;
+            right_bound = lsn;
+            right_bound_is_pregap = is_pregap;
+            right_bound_abs_lsn = lsn;
+            nb_damaged_used++;
+            nb_repaired += repaired;
         }
     }
 
@@ -437,26 +335,49 @@ lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, const track_t track_number)
         cyanrip_log(ctx, 0, "Warning: could not narrow down the pregap of track %i to a single "
                     "sector (unreadable sectors near the track boundary), skipping pregap detection\n",
                     track_number);
+        info->result = CYANRIP_PREGAP_SEARCH_UNREADABLE;
         av_free(audio_subq_buf);
         return CDIO_INVALID_LSN;
     }
 
+    info->result = CYANRIP_PREGAP_SEARCH_DONE;
+    info->damaged_frames = nb_damaged_used;
+    info->repaired_frames = nb_repaired;
+
     /* The new track begins at right_bound, but unless that sector has index 0
      * it is the track itself showing up ahead of the TOC, not a pregap. */
     lsn = right_bound_is_pregap ? right_bound : CDIO_INVALID_LSN;
+
+    /* right_bound is the sector that was asked for; the Q frame that came back
+     * says which sector it is really from. Go by that, as long as the frames
+     * on both bounds agree they are neighbours, which shows the drive was off
+     * by the same amount for both, and the result still makes for a pregap. */
+    if (lsn != CDIO_INVALID_LSN &&
+        left_bound_abs_lsn != CDIO_INVALID_LSN &&
+        left_bound_abs_lsn + 1 == right_bound_abs_lsn &&
+        right_bound_abs_lsn > prev_track_start_lsn &&
+        right_bound_abs_lsn < track_start_lsn) {
+        info->q_skew = right_bound_abs_lsn - right_bound;
+        lsn = right_bound_abs_lsn;
+    }
 
     av_free(audio_subq_buf);
     return lsn;
 
 fail:
     assert(ret != DRIVER_OP_SUCCESS);
-    if (total_failures > TOTAL_FAILURE_BUDGET)
+    if (total_failures > TOTAL_FAILURE_BUDGET) {
         cyanrip_log(ctx, 0, "Warning: repeated subq CRC mismatches prevented finding the "
                 "pregap of track %i, skipping pregap detection\n", track_number);
-    else
+        info->result = CYANRIP_PREGAP_SEARCH_CRC_BUDGET;
+    } else {
         cyanrip_log(ctx, 0, "Warning: failed to read subq data at lsn %i (error %i) while "
                     "searching for the pregap of track %i, skipping pregap detection\n",
                     lsn, ret, track_number);
+        info->result = CYANRIP_PREGAP_SEARCH_READ_ERROR;
+        info->failed_lsn = lsn;
+        info->failed_error = ret;
+    }
 
     av_free(audio_subq_buf);
     return CDIO_INVALID_LSN;

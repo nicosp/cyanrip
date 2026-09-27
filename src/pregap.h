@@ -21,4 +21,9 @@
 #include <cdio/cdio.h>
 #include "cyanrip_main.h"
 
-lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, track_t track_number);
+/**
+ * Finds the sector the pregap of track_number starts at, or CDIO_INVALID_LSN
+ * if it has none or it couldn't be found. info, if given, says how the search
+ * went; see cyanrip_pregap_info.
+ */
+lsn_t cyanrip_get_track_pregap_lsn(cyanrip_ctx *ctx, track_t track_number, cyanrip_pregap_info *info);
