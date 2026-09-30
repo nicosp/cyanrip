@@ -15,7 +15,7 @@ set -eo pipefail
 CURL_VERSION=8.16.0
 NEON_VERSION=0.37.1
 LIBQRENCODE_VERSION=4.1.1
-LIBCDIO_VERSION=2.1.0
+LIBCDIO_VERSION=2.4.0
 LIBCDIO_PARANOIA_VERSION=10.2+2.0.2
 LAME_VERSION=3.100
 LIBOGG_VERSION=1.3.6
@@ -163,7 +163,9 @@ build_libqrencode() {
 }
 
 build_libcdio() {
-    cyan_do_tarball "https://ftp.gnu.org/gnu/libcdio/libcdio-$LIBCDIO_VERSION.tar.bz2" "libcdio-$LIBCDIO_VERSION"
+    # The macOS backend needs cdio_get_device_fd(), newer than the last
+    # release on ftp.gnu.org.
+    cyan_do_tarball "https://github.com/libcdio/libcdio/releases/download/$LIBCDIO_VERSION/libcdio-$LIBCDIO_VERSION.tar.gz" "libcdio-$LIBCDIO_VERSION"
     cyan_do_confmakeinstall --disable-{cxx,example-progs,cddb,vcd-info} \
         --without-{cd-drive,cd-info,cdda-player,cd-read,iso-info,iso-read}
 }
