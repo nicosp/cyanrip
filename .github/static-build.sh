@@ -185,10 +185,9 @@ build_libogg() {
 
 build_libvorbis() {
     cyan_do_tarball "https://downloads.xiph.org/releases/vorbis/libvorbis-$LIBVORBIS_VERSION.tar.xz" "libvorbis-$LIBVORBIS_VERSION"
-    # The configure script passes -force_cpusubtype_ALL on macOS, which the
-    # current Xcode linker rejects.
-    sed -i.bak 's/-force_cpusubtype_ALL//g' configure
-    cyan_do_confmakeinstall --disable-{oggtest,examples,docs}
+    # The configure script hardcodes -force_cpusubtype_ALL on macOS, which
+    # the current Xcode linker rejects; the CMake build doesn't.
+    cyan_do_cmakeinstall
 }
 
 build_opus() {
