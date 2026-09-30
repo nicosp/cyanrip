@@ -92,15 +92,7 @@ jobs:
 
   macos-dmg:
     if: github.event_name == 'release'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runs-on: macos-latest
-            arch: arm64
-          - runs-on: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
@@ -118,18 +110,18 @@ jobs:
           cp cyanrip README.md LICENSE.md dmg/
           codesign --force --sign - dmg/cyanrip
           hdiutil create -volname cyanrip -srcfolder dmg -ov -format UDZO \
-            "cyanrip-macos-${{ matrix.arch }}.dmg"
+            cyanrip-macos-arm64.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cyanrip-macos-${{ matrix.arch }}
-          path: cyanrip-macos-${{ matrix.arch }}.dmg
+          name: cyanrip-macos-arm64
+          path: cyanrip-macos-arm64.dmg
 
       - name: Upload the release asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "cyanrip-macos-${{ matrix.arch }}.dmg" --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" cyanrip-macos-arm64.dmg --clobber
 
   mingw:
     runs-on: windows-latest
