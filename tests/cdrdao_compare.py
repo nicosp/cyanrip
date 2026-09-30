@@ -139,6 +139,8 @@ def main():
                     help="where the toc, logs and cyanrip output go")
     ap.add_argument("--prepare", action="store_true",
                     help="unmount the disc and stop gvfsd-cdda first")
+    ap.add_argument("--cyanrip-arg", action="append", default=[],
+                    metavar="ARG", help="extra argument for cyanrip (repeatable)")
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parent.parent
@@ -171,7 +173,8 @@ def main():
         out = args.cyanrip_output.read_text()
     else:
         ec, out = run([cyanrip, "-d", args.device, "-I", "-N", "-A", "-U",
-                       "-s", args.offset], args.workdir / "cyanrip.log")
+                       "-s", args.offset, *args.cyanrip_arg],
+                      args.workdir / "cyanrip.log")
         if ec != 0:
             print(out)
             sys.exit(f"cyanrip failed with {ec}")
