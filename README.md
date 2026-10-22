@@ -122,7 +122,7 @@ Arguments are optional, except `-s`. By default cyanrip will rip all tracks from
 | -Z `int`             | Rips tracks until their checksums match `<int>` number of times. For very damaged CDs.      |
 | -S `int`             | Sets the drive speed if possible (default is unset, usually maximum)                        |
 | -p `number=string`   | Specifies what to do with the pregap, syntax is described below                             |
-| -P `int`             | Sets the [paranoia level](#paranoia-level), default is max, 0 disables checking completely  |
+| -P `int`             | Sets the [paranoia level](#paranoia-level), default is max (none for disc images)            |
 | -O                   | Overread into lead-in/lead-out areas, if unsupported by drive may freeze ripping            |
 | -H                   | Enable HDCD decoding, read below for details                                                |
 | -E                   | Force CD deemphasis, for CDs mastered with preemphasis without actually signalling it       |
@@ -334,6 +334,8 @@ cyanrip can apply four levels of `cdparanoia` error detection and correction:
 | -P `1`           | Overlapped reads              | Correct errors when optical drives skip sectors while reading audio discs         | -Y                          |
 | -P `2`           | Overlapped and verified reads | Re-read sectors to correct for optical drives that supply inconsistent audio data | *n/a*                       |
 | -P `3` or `max`  | All paranoia features         | At present, same as `-P 2`, but includes future `cdparanoia` improvements         | *default*                   |
+
+Disc images (CUE/BIN, NRG and cdrdao TOC files) are ripped with `-P none` by default, as reading an image returns the same data every time, so there is nothing for paranoia to correct. Pass `-P` to use paranoia on them anyway.
 
 
 Paranoia status count
