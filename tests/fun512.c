@@ -46,14 +46,14 @@ static void check_str(const char *what, const char *got, const char *want)
 static void check_verify(const char *what, const char *contents,
                          enum CRIPLogVerify want)
 {
-    char path[] = "/tmp/crip_fun512_XXXXXX";
-    int fd = mkstemp(path);
-    if (fd < 0) {
-        printf("FAIL: mkstemp\n");
+    /* In the working directory, which meson sets to the build directory */
+    const char *path = "fun512_test.log";
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        printf("FAIL: creating %s\n", path);
         fails++;
         return;
     }
-    FILE *f = fdopen(fd, "wb");
     fwrite(contents, 1, strlen(contents), f);
     fclose(f);
 
