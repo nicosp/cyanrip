@@ -18,7 +18,7 @@
 
 #include <stdarg.h>
 #include <time.h>
-#include <pthread.h>
+#include "thread_compat.h"
 
 #include <libavutil/avutil.h>
 #include <libavutil/sha512.h>

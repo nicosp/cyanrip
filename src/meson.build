@@ -28,19 +28,10 @@ libcdio_version = host_machine.system() == 'darwin' ? '>= 2.3.0' : '>= 2.0'
 
 libcdio = dependency('libcdio', version: libcdio_version)
 
-# MSVC has no pthreads; use pthreads4w (vcpkg's pthreads). It's linked by
-# name, as with prefer_static (a static build) find_library() searches the
-# compiler's library directories, and MSVC reports none.
+# MSVC has no pthreads: src/thread_compat.h gives cyanrip what it uses of
+# them on Windows' own threads and locks, which need no library
 if cc.get_argument_syntax() == 'msvc'
-    threads = declare_dependency(link_args: '-lpthreadVC3')
-    if not cc.links('''#include <pthread.h>
-                       int main(void) {
-                           pthread_mutex_t m;
-                           pthread_mutex_init(&m, NULL);
-                           return pthread_mutex_destroy(&m);
-                       }''', dependencies: threads, name: 'pthreads4w')
-        error('Building with MSVC needs pthreads4w (pthreadVC3.lib)')
-    endif
+    threads = declare_dependency()
 else
     threads = dependency('threads')
 endif

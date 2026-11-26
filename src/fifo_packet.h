@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pthread.h>
+#include "thread_compat.h"
 #include <assert.h>
 #include <libavcodec/packet.h>
 
