@@ -214,3 +214,100 @@ jobs:
           asset_path: ./cyanrip.exe
           asset_name: cyanrip-win64-latest.exe
           asset_content_type: application/vnd.microsoft.portable-executable
+
+  msvc:
+    runs-on: windows-latest
+    env:
+      DEPS: ${{ github.workspace }}/deps
+      VCPKG_TRIPLET: x64-windows
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # pkgconf from PyPI, as the runner's pkg-config is Strawberry Perl's
+      - name: Install Meson
+        run: |
+          pip install meson ninja pkgconf
+          "PKG_CONFIG=pkgconf" >> $env:GITHUB_ENV
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Get the vcpkg version
+        id: vcpkg
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          "commit=$(git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-msvc-${{ steps.vcpkg.outputs.commit }}-ffmpeg-zlib-curl-libxml2-pthreads
+
+      - name: Install dependencies from vcpkg
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg" install --triplet $env:VCPKG_TRIPLET `
+            "ffmpeg[core,avcodec,avformat,avfilter,swresample,zlib,ffprobe]" curl libxml2 pthreads
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $vcpkg = "$env:VCPKG_INSTALLATION_ROOT\installed\$env:VCPKG_TRIPLET"
+          "VCPKG_PREFIX=$vcpkg" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$env:DEPS/lib/pkgconfig;$vcpkg/lib/pkgconfig" >> $env:GITHUB_ENV
+          "INCLUDE=$vcpkg\include;$env:INCLUDE" >> $env:GITHUB_ENV
+          "LIB=$vcpkg\lib;$env:LIB" >> $env:GITHUB_ENV
+          "$env:DEPS\bin" >> $env:GITHUB_PATH
+          "$vcpkg\bin" >> $env:GITHUB_PATH
+          "$vcpkg\tools\ffmpeg" >> $env:GITHUB_PATH
+
+      # Saved straight away, so a later step failing doesn't lose it
+      - uses: actions/cache/save@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-msvc-${{ steps.vcpkg.outputs.commit }}-ffmpeg-zlib-curl-libxml2-pthreads
+
+      - name: Build libcdio
+        run: |
+          git clone --depth 1 -b export-macros https://github.com/nicosp/libcdio-C.git
+          meson setup libcdio-C/build libcdio-C --prefix $env:DEPS --buildtype release `
+            -Dcxx=false -Dexamples=false -Dtests=false -Dcddb=disabled
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          meson install -C libcdio-C/build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build libcdio-paranoia
+        run: |
+          git clone --depth 1 -b meson-export-symbols https://github.com/nicosp/libcdio-paranoia.git
+          meson setup libcdio-paranoia/build libcdio-paranoia --prefix $env:DEPS --buildtype release `
+            --wrap-mode nofallback -Dexamples=false -Dtests=false
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          meson install -C libcdio-paranoia/build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build libmusicbrainz
+        run: |
+          git clone --depth 1 -b msvc-fixes https://github.com/nicosp/libmusicbrainz.git
+          $prefix = $env:DEPS -replace '\\', '/'
+          cmake -S libmusicbrainz -B libmusicbrainz/build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$prefix" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --build libmusicbrainz/build --target musicbrainz5 musicbrainz5cc
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cmake --install libmusicbrainz/build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build
+        run: |
+          meson setup build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Keep going after errors so one run reports all of them
+          meson compile -C build --ninja-args=-k0
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Test
+        run: meson test -C build --print-errorlogs
