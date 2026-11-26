@@ -138,6 +138,15 @@ static int crip_bprint_sanitize(cyanrip_ctx *ctx, AVBPrint *buf, const char *str
         int skip_sanitation = rep && (os_sanitize && rep->is_avail_locally);
         int passthrough_slash = rep && !skip_sanitation && (rep->from == OS_DIR_CHAR && !sanitize_fwdslash);
 
+#ifdef OS_ALT_DIR_CHAR
+        /* Outside of tags, the other separator splits directories too */
+        if (rep && rep->from == OS_ALT_DIR_CHAR && !sanitize_fwdslash) {
+            av_bprint_chars(buf, OS_DIR_CHAR, 1);
+            pos = str;
+            continue;
+        }
+#endif
+
         if (skip || skip_sanitation || passthrough_slash) {
             av_bprint_append_data(buf, pos, str - pos);
             pos = str;

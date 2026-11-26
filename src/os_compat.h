@@ -65,6 +65,9 @@ static inline int cyanrip_stat(const char *filename_utf8, cyanrip_stat_t* statbu
 }
 
 #define mkdir(path, mode) win32_mkdir(path)
+
+/* Paths given on the command line use either */
+#define OS_ALT_DIR_CHAR '\\'
 #else
 typedef struct stat cyanrip_stat_t;
 #define cyanrip_stat stat
