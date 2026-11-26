@@ -19,7 +19,6 @@
 #include <time.h>
 #include <stdarg.h>
 #include <stdatomic.h>
-#include <strings.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -111,7 +110,7 @@ int cyanrip_validate_fmt(const char *fmt)
 {
     for (int i = 0; i < CYANRIP_FORMATS_NB; i++) {
         const cyanrip_out_fmt *cfmt = &crip_fmt_info[i];
-        if ((!strncasecmp(fmt, cfmt->name, strlen(fmt))) &&
+        if ((!av_strncasecmp(fmt, cfmt->name, strlen(fmt))) &&
             (strlen(fmt) == strlen(cfmt->name))) {
 
             if (cfmt->codec == AV_CODEC_ID_NONE) {

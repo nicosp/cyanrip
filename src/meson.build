@@ -1,13 +1,20 @@
 build_opts = [
     '-D_ISOC11_SOURCE', '-D_XOPEN_SOURCE=700', '-U__STRICT_ANSI__',
+]
 
+build_opts += cc.get_supported_arguments(
     # Warnings
     '-Wundef', '-Wmissing-prototypes', '-Wshadow', '-Wparentheses',
     '-Wpointer-arith', '-Wno-pointer-sign',
 
     # Warnings to treat as errors
     '-Werror=implicit-function-declaration',
-]
+)
+
+# MSVC has <stdatomic.h> only with this flag (Visual Studio 17.5 and later)
+if cc.get_argument_syntax() == 'msvc'
+    build_opts += '/experimental:c11atomics'
+endif
 
 #fix for MinGW32
 if host_machine.system() == 'windows' and cc.sizeof('void*') == 4
@@ -20,6 +27,13 @@ static_build = get_option('default_library') == 'static'
 libcdio_version = host_machine.system() == 'darwin' ? '>= 2.3.0' : '>= 2.0'
 
 libcdio = dependency('libcdio', version: libcdio_version)
+
+# MSVC has no pthreads; use pthreads4w (vcpkg's pthreads)
+if cc.get_argument_syntax() == 'msvc'
+    threads = cc.find_library('pthreadVC3', has_headers: 'pthread.h')
+else
+    threads = dependency('threads')
+endif
 
 # Required dependencies
 dependencies = [
@@ -37,8 +51,8 @@ dependencies = [
     dependency('libcurl', version: '>=7.66.0'),
 
     # misc
-    dependency('threads'),
-    cc.find_library('m', required : true),
+    threads,
+    cc.find_library('m', required : cc.get_argument_syntax() != 'msvc'),
 ]
 
 # Base files
@@ -102,10 +116,12 @@ else
     message('libchromaprint not found, tracks won\'t be fingerprinted for AcoustID')
 endif
 
-# Check for wmain support (Windows/MinGW)
-if cc.links('int wmain() { return 0; }', args: '-municode')
+# Check for wmain support (Windows). MinGW needs -municode for it, MSVC
+# finds wmain() by itself.
+municode = cc.get_argument_syntax() == 'msvc' ? [] : ['-municode']
+if host_machine.system() == 'windows' and cc.links('int wmain() { return 0; }', args: municode)
      conf.set('HAVE_WMAIN', 1)
-     build_opts += '-municode'
+     build_opts += municode
 endif
 
 add_global_arguments(build_opts, language: 'c')
