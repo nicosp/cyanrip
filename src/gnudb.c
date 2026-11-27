@@ -188,9 +188,10 @@ static AVDictionary *gnudb_read(cyanrip_ctx *ctx, const char *categ, const char 
         if (!eq)
             continue;
 
+        /* A field too long for one line continues on the next ones */
         *eq = '\0';
         if (eq[1])
-            av_dict_set(&fields, line, eq + 1, 0);
+            av_dict_set(&fields, line, eq + 1, AV_DICT_APPEND);
     }
 
     av_free(resp);
@@ -244,7 +245,7 @@ void crip_fill_gnudb(cyanrip_ctx *ctx)
         return;
 
     int nb_tracks = ctx->id_last_track - ctx->id_first_track + 1;
-    uint32_t offsets[99];
+    uint32_t offsets[99] = { 0 };
     for (int i = 0; i < nb_tracks; i++)
         offsets[i] = ctx->id_offsets[ctx->id_first_track + i];
 
@@ -277,6 +278,9 @@ void crip_fill_gnudb(cyanrip_ctx *ctx)
 
         cyanrip_track *t = &ctx->tracks[i];
         gnudb_set_split(&t->gnudb, "artist", "title", dict_get(fields, key));
+        /* Without one of its own, a track's artist is the disc's, as in libcddb */
+        if (!dict_get(t->gnudb, "artist"))
+            gnudb_set(&t->gnudb, "artist", dict_get(ctx->gnudb, "album_artist"));
         if (dict_get(t->gnudb, "title"))
             nb_track_titles++;
 

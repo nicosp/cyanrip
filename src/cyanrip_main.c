@@ -1978,7 +1978,8 @@ int main(int argc, char **argv)
     const char *mcn_id = dict_get(ctx->meta, "disc_mcn");
     const char *did_id = dict_get(ctx->meta, "musicbrainz_discid");
 
-    if (barcode_id || mcn_id || did_id) {
+    /* Tell unknown discs apart */
+    if (!dict_get(ctx->gnudb, "album") && (barcode_id || mcn_id || did_id)) {
         char fourcc_id[5] = { '0', '0', '0', '0', '\0' };
         const char *id = NULL;
 
