@@ -1593,9 +1593,9 @@ int main(int argc, char **argv)
                 "Cover art: title=path (or N=path per-track, repeatable)");
     GEN_OPT_ONE(opts_list, bool,    no_musicbrainz, "N", 0, 0, 0, 0, 0,
                 "Disable MusicBrainz lookup");
-    GEN_OPT_ONE(opts_list, char *,  gnudb_email, "e", 1, 1, NULL, 0, 0,
+    GEN_OPT_ONE(opts_list, char *,  gnudb_email, "", 1, 1, NULL, 0, 0,
                 "GNUdb contact email (XLD's \"CDDB Mail\"); enables GNUdb lookup");
-    GEN_OPT_ONE(opts_list, char *,  gnudb_host, "g", 1, 1, "gnudb.gnudb.org", 0, 0,
+    GEN_OPT_ONE(opts_list, char *,  gnudb_host, "", 1, 1, "gnudb.gnudb.org", 0, 0,
                 "GNUdb server, same default XLD/EAC use");
     GEN_OPT_ONE(opts_list, bool,    no_accurip, "A", 0, 0, 0, 0, 0,
                 "Disable AccurateRip database query and validation");
@@ -1962,7 +1962,7 @@ int main(int argc, char **argv)
         goto end;
     }
 
-    /* Fill in album/track metadata from GNUdb, if it's configured (-e) and
+    /* Fill in album/track metadata from GNUdb, if it's configured (--gnudb-email) and
      * has an entry for this disc. Must run before the MusicBrainz lookup
      * below, so a successful lookup takes priority, and before the
      * "Default album title" block, so its (lower priority) values aren't

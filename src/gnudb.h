@@ -23,8 +23,8 @@
 /* Looks up the disc on GNUdb (a CDDB-protocol CD database), the same
  * service (and default server, gnudb.gnudb.org) XLD and older EAC versions
  * use - see XLDCDDBUtil.m's use of libcddb. Enabled by supplying a contact
- * email via -e/--gnudb-email (matching XLD's "CDDB Mail" preference); the
- * server can be overridden via -g/--gnudb-host, e.g. for a personalized,
+ * email via --gnudb-email (matching XLD's "CDDB Mail" preference); the
+ * server can be overridden via --gnudb-host, e.g. for a personalized,
  * pre-registered host. GNUdb requires every app name to be pre-registered
  * with them (see gnudb.org/howtognudb.php) - the email alone isn't enough,
  * unlike XLD, which already has "XLD" approved. Until "cyanrip" is
