@@ -20,6 +20,7 @@
 #include "cyanrip_log.h"
 
 #include <curl/curl.h>
+#include <libavutil/avstring.h>
 #include <libavutil/bprint.h>
 
 /* GNUdb requires every application name to be pre-registered with them
@@ -42,9 +43,20 @@ static char *gnudb_request(cyanrip_ctx *ctx, const char *cmd)
     if (!curl)
         return NULL;
 
-    char hello[256];
-    snprintf(hello, sizeof(hello), "%s localhost %s %s",
-             ctx->settings.gnudb_email, GNUDB_APPNAME, PROJECT_VERSION_STRING);
+    /* The hello's user and host are the email's two halves, as in libcddb:
+     * GNUdb answers a hello with an '@' in it with a syntax error */
+    char user[256];
+    av_strlcpy(user, ctx->settings.gnudb_email, sizeof(user));
+    char *at = strchr(user, '@');
+    const char *host = "localhost";
+    if (at) {
+        *at = '\0';
+        host = at + 1;
+    }
+
+    char hello[512];
+    snprintf(hello, sizeof(hello), "%s %s %s %s",
+             user, host, GNUDB_APPNAME, PROJECT_VERSION_STRING);
 
     char *cmd_esc = curl_easy_escape(curl, cmd, 0);
     char *hello_esc = curl_easy_escape(curl, hello, 0);
@@ -94,6 +106,17 @@ static char *gnudb_request(cyanrip_ctx *ctx, const char *cmd)
     return str;
 }
 
+/* GNUdb turns applications it doesn't know away with a match whose title
+ * is the error, e.g. "data e60d4255 500 Unknown application / developer
+ * email for ...": returns that error, if the title is one */
+static const char *gnudb_error(const char *title)
+{
+    if (title && (title[0] == '4' || title[0] == '5') && av_isdigit(title[1]) &&
+        av_isdigit(title[2]) && title[3] == ' ')
+        return title;
+    return NULL;
+}
+
 /* Sends "cddb query ...", and on a match, writes its category and disc ID
  * (needed for a follow-up "cddb read") into the given buffers. Returns 0 if
  * there's no usable match. */
@@ -140,6 +163,11 @@ static int gnudb_query(cyanrip_ctx *ctx, const char *discid, int nb_tracks,
                 char *save3;
                 categ = av_strtok(entry, " ", &save3);
                 match_id = av_strtok(NULL, " ", &save3);
+                const char *error = gnudb_error(av_strtok(NULL, "", &save3));
+                if (error) {
+                    av_strlcpy(status_line, error, sizeof(status_line));
+                    categ = match_id = NULL;
+                }
             }
         }
 
@@ -178,6 +206,8 @@ static AVDictionary *gnudb_read(cyanrip_ctx *ctx, const char *categ, const char 
     }
 
     AVDictionary *fields = NULL;
+    char status_line[256];
+    av_strlcpy(status_line, line, sizeof(status_line));
     while ((line = av_strtok(NULL, "\r\n", &save))) {
         if (!strcmp(line, "."))
             break;
@@ -185,14 +215,28 @@ static AVDictionary *gnudb_read(cyanrip_ctx *ctx, const char *categ, const char 
             continue;
 
         char *eq = strchr(line, '=');
-        if (!eq)
+        if (!eq) {
+            /* "<category> <discid> <error>", as in a query's reply */
+            const char *error = line;
+            for (int i = 0; error && i < 2; i++)
+                if ((error = strchr(error, ' ')))
+                    error++;
+            if ((error = gnudb_error(error))) {
+                av_strlcpy(status_line, error, sizeof(status_line));
+                av_dict_free(&fields);
+                break;
+            }
             continue;
+        }
 
         /* A field too long for one line continues on the next ones */
         *eq = '\0';
         if (eq[1])
             av_dict_set(&fields, line, eq + 1, AV_DICT_APPEND);
     }
+
+    if (!fields)
+        cyanrip_log(ctx, 0, "GNUdb: %s\n", status_line);
 
     av_free(resp);
     return fields;
@@ -249,7 +293,8 @@ void crip_fill_gnudb(cyanrip_ctx *ctx)
     for (int i = 0; i < nb_tracks; i++)
         offsets[i] = ctx->id_offsets[ctx->id_first_track + i];
 
-    uint32_t total_secs = ctx->id_offsets[0]/75 - offsets[0]/75;
+    /* The lead-out's position: GNUdb rejects anything else */
+    uint32_t total_secs = ctx->id_offsets[0]/75;
 
     char categ[32], match_id[16];
     if (!gnudb_query(ctx, discid_lc, nb_tracks, offsets, total_secs,
