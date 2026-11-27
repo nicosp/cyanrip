@@ -5,9 +5,9 @@
 #   GNUDB_EMAIL=you@example.com tests/gnudb_record.py NAME 'CDDB COMMAND' ...
 #
 # Each reply is saved as tests/fixtures/gnudb/live-NAME.txt.  The request is
-# the one cyanrip makes: the hello is "<GNUDB_EMAIL> localhost cyanrip
-# <version>", with proto 6.  The address is replaced with EMAIL in what's
-# saved.  For example:
+# the one cyanrip makes: the hello is "<user> <host> cyanrip <version>",
+# the halves of GNUDB_EMAIL, with proto 6.  The address is replaced with
+# EMAIL in what's saved.  For example:
 #
 #   GNUDB_EMAIL=... tests/gnudb_record.py \
 #       query-unknown-disc 'cddb query 00000001 1 150 100' \
@@ -27,6 +27,7 @@ VERSION = os.environ.get("CYANRIP_VERSION", "0.9.4-rc3")
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "gnudb"
 
 email = os.environ.get("GNUDB_EMAIL")
+user, _, host = (email or "").partition("@")
 args = sys.argv[1:]
 if not email or not args or len(args) % 2:
     sys.exit("usage: GNUDB_EMAIL=... gnudb_record.py NAME 'CDDB COMMAND' ...")
@@ -35,7 +36,7 @@ for i in range(0, len(args), 2):
     name, cmd = args[i], args[i + 1]
     query = urllib.parse.urlencode({
         "cmd": cmd,
-        "hello": f"{email} localhost cyanrip {VERSION}",
+        "hello": f"{user} {host} cyanrip {VERSION}",
         "proto": "6",
     })
     req = urllib.request.Request(

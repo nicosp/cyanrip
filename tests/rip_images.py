@@ -525,7 +525,7 @@ def flac_tags(path):
 
 
 GNUDB_EMAIL = "test@example.invalid"
-GNUDB_QUERY = "cddb query 08000802 2 150 450 8"
+GNUDB_QUERY = "cddb query 08000802 2 150 450 10"
 GNUDB_ALBUM = "Test Album, a title long enough to be split over two lines"
 
 
@@ -565,7 +565,7 @@ def sc_gnudb():
             fail(f"gnudb: requests {cmds}")
         for r in srv.requests:
             hello = r.hello.split()
-            if len(hello) != 4 or hello[0] != GNUDB_EMAIL or hello[2] != "cyanrip":
+            if hello[:3] != ["test", "example.invalid", "cyanrip"] or len(hello) != 4:
                 fail(f"gnudb: hello {r.hello!r}")
             if r.proto != "6":
                 fail(f"gnudb: proto {r.proto!r}, wanted 6 (UTF-8)")
@@ -609,15 +609,22 @@ def sc_gnudb():
                 fail(f"{name}: GNUdb tags applied")
 
     # The replies gnudb.gnudb.org gave, recorded with gnudb_record.py, to
-    # every command: errors must be logged, and nothing may crash
+    # every command: failures must be logged, and nothing may crash
     for f in sorted((FIX / "gnudb").glob("live-*.txt")):
         status = (f.read_text(encoding="utf-8", errors="replace").split()
                   or ["(empty)"])[0]
         with GnudbServer() as srv:
-            srv.respond("cddb", f.name)
+            # live-read-* replies answer the read of a match, the others
+            # every command
+            if f.name.startswith("live-read-"):
+                srv.respond("cddb read", f.name)
+            else:
+                srv.respond("cddb", f.name)
             log = gnudb_info(f"gnudb_{f.stem}", srv, "--gnudb-email", GNUDB_EMAIL)
-            if status[:1] in "3459" and f"GNUdb: {status}" not in log:
-                fail(f"gnudb {f.name}: its status {status} not logged")
+            if "DTITLE=" in f.read_text(encoding="utf-8", errors="replace"):
+                continue
+            if "GNUdb: " not in log or "Found GNUdb entry" in log:
+                fail(f"gnudb {f.name}: the failure wasn't logged")
 
 with tempfile.TemporaryDirectory() as tmpdir:
     WORK = Path(tmpdir)

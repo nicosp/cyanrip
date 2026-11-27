@@ -4,7 +4,7 @@
 # It answers GET /~cddb/cddb.cgi?cmd=...&hello=...&proto=... from the
 # fixtures in tests/fixtures/gnudb, which are the bodies GNUdb returns:
 #
-#   query-<discid>.txt          reply to "cddb query <discid> ..."
+#   query-<discid>.txt            reply to "cddb query <discid> ..."
 #   read-<category>-<discid>.txt  reply to "cddb read <category> <discid>"
 #
 # A query or read without a fixture gets the protocol's "no match" (202) or
@@ -88,9 +88,11 @@ class GnudbServer:
             if req.cmd.startswith(prefix):
                 return answer
 
+        # As gnudb.gnudb.org: a hello that isn't "user host app version",
+        # or has an '@' in it, is a syntax error
         args = req.cmd.split()
-        if len(req.hello.split()) != 4:
-            return 200, b"500 Command syntax error: incorrect number of arguments.\r\n"
+        if len(req.hello.split()) != 4 or "@" in req.hello:
+            return 200, b"500 Command syntax error.\r\n"
         if args[:2] == ["cddb", "query"] and len(args) >= 4:
             f = self.fixtures / f"query-{args[2]}.txt"
             if f.is_file():
