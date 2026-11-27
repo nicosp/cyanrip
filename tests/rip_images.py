@@ -499,6 +499,126 @@ def sc_verify_log():
         fail("tampered log verified")
 
 
+
+def flac_tags(path):
+    """The Vorbis comments of a FLAC file, keys upper-cased"""
+    data = Path(path).read_bytes()
+    pos, tags = 4, {}
+    while pos < len(data):
+        last, kind = data[pos] & 0x80, data[pos] & 0x7F
+        size = int.from_bytes(data[pos + 1:pos + 4], "big")
+        block = data[pos + 4:pos + 4 + size]
+        if kind == 4:
+            n = int.from_bytes(block[0:4], "little")
+            off = 4 + n
+            count = int.from_bytes(block[off:off + 4], "little")
+            off += 4
+            for _ in range(count):
+                n = int.from_bytes(block[off:off + 4], "little")
+                key, _, val = block[off + 4:off + 4 + n].decode().partition("=")
+                tags[key.upper()] = val
+                off += 4 + n
+        if last:
+            break
+        pos += 4 + size
+    return tags
+
+
+GNUDB_EMAIL = "test@example.invalid"
+GNUDB_QUERY = "cddb query 08000802 2 150 450 8"
+GNUDB_ALBUM = "Test Album, a title long enough to be split over two lines"
+
+
+def gnudb_info(name, srv, *extra):
+    ec, log = crip("-d", WORK / "basic.cue", "-I", "-N", "-A", "-U", "-P", "0",
+                   "--gnudb-host", srv.host, *extra)
+    (WORK / f"{name}.log").write_text(log)
+    if ec != 0:
+        fail(f"{name}: cyanrip exited with {ec} (log follows)")
+        print(log)
+    return log
+
+
+def gnudb_check_tags(name):
+    tags = [flac_tags(WORK / f"out_{name}" / f"{t}.flac") for t in (1, 2)]
+    for t, (want_title, want_artist) in enumerate(
+            (("Ünïcödé Track", "Test Artist"),
+             ("Second Track", "Guest Artist")), 1):
+        have = tags[t - 1]
+        for key, want in (("ALBUM", GNUDB_ALBUM), ("ALBUMARTIST", "Test Artist"),
+                          ("DATE", "1999"), ("GENRE", "Pop"),
+                          ("TITLE", want_title), ("ARTIST", want_artist)):
+            if have.get(key) != want:
+                fail(f"{name}: track {t} {key} {have.get(key)!r} != {want!r}")
+
+
+def sc_gnudb():
+    sys.dont_write_bytecode = True  # no __pycache__ in the source tree
+    from gnudb_server import GnudbServer
+
+    # An exact match: the query and read cyanrip sends, and the entry's
+    # fields in the tags, with a title split over two lines joined up
+    with GnudbServer() as srv:
+        rip("gnudb", "basic.cue", "--gnudb-email", GNUDB_EMAIL, "--gnudb-host", srv.host)
+        cmds = [r.cmd for r in srv.requests]
+        if cmds != [GNUDB_QUERY, "cddb read rock 08000802"]:
+            fail(f"gnudb: requests {cmds}")
+        for r in srv.requests:
+            hello = r.hello.split()
+            if len(hello) != 4 or hello[0] != GNUDB_EMAIL or hello[2] != "cyanrip":
+                fail(f"gnudb: hello {r.hello!r}")
+            if r.proto != "6":
+                fail(f"gnudb: proto {r.proto!r}, wanted 6 (UTF-8)")
+        gnudb_check_tags("gnudb")
+
+    # Inexact matches: the first one is read
+    with GnudbServer() as srv:
+        srv.respond("cddb query",
+                    "211 Found inexact matches, list follows (until terminating `.')\r\n"
+                    "rock 08000802 Test Artist / Test Album\r\n"
+                    "misc 0800aa02 Someone Else / Another Album\r\n.\r\n")
+        rip("gnudb_inexact", "basic.cue", "--gnudb-email", GNUDB_EMAIL, "--gnudb-host", srv.host)
+        if [r.cmd for r in srv.requests][1:] != ["cddb read rock 08000802"]:
+            fail(f"gnudb_inexact: requests {srv.requests}")
+        gnudb_check_tags("gnudb_inexact")
+
+    # Without an email, nothing is looked up
+    with GnudbServer() as srv:
+        gnudb_info("gnudb_off", srv)
+        if srv.requests:
+            fail(f"gnudb_off: requests {srv.requests}")
+
+    # Failures are logged and the rip carries on, with the default tags
+    cases = (
+        ("gnudb_nomatch", "cddb query", "202 No match found\r\n", 200,
+         "GNUdb: 202 No match found"),
+        ("gnudb_noentry", "cddb read",
+         "401 Specified CDDB entry not found.\r\n", 200,
+         "GNUdb: 401 Specified CDDB entry not found."),
+        ("gnudb_http", "cddb query", "", 503, "GNUdb request failed"),
+        ("gnudb_garbage", "cddb query", "<html>not CDDB</html>", 200,
+         "GNUdb: <html>not CDDB</html>"),
+    )
+    for name, prefix, body, status, want in cases:
+        with GnudbServer() as srv:
+            srv.respond(prefix, body, status)
+            log = gnudb_info(name, srv, "--gnudb-email", GNUDB_EMAIL)
+            if want not in log:
+                fail(f"{name}: {want!r} not logged")
+            if "Unknown disc" not in log or "Found GNUdb entry" in log:
+                fail(f"{name}: GNUdb tags applied")
+
+    # The replies gnudb.gnudb.org gave, recorded with gnudb_record.py, to
+    # every command: errors must be logged, and nothing may crash
+    for f in sorted((FIX / "gnudb").glob("live-*.txt")):
+        status = (f.read_text(encoding="utf-8", errors="replace").split()
+                  or ["(empty)"])[0]
+        with GnudbServer() as srv:
+            srv.respond("cddb", f.name)
+            log = gnudb_info(f"gnudb_{f.stem}", srv, "--gnudb-email", GNUDB_EMAIL)
+            if status[:1] in "3459" and f"GNUdb: {status}" not in log:
+                fail(f"gnudb {f.name}: its status {status} not logged")
+
 with tempfile.TemporaryDirectory() as tmpdir:
     WORK = Path(tmpdir)
 

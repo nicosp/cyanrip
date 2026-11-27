@@ -1,0 +1,24 @@
+210 rock 08000802 CD database entry follows (until terminating `.')
+# xmcd
+#
+# Track frame offsets:
+#        150
+#        450
+#
+# Disc length: 10 seconds
+#
+# Revision: 0
+# Submitted via: cyanrip-tests 1.0
+#
+DISCID=08000802
+DTITLE=Test Artist / Test Album, a title long enough to be
+DTITLE= split over two lines
+DYEAR=1999
+DGENRE=Pop
+TTITLE0=Ünïcödé Track
+TTITLE1=Guest Artist / Second Track
+EXTD=
+EXTT0=
+EXTT1=
+PLAYORDER=
+.

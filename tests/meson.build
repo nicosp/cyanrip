@@ -62,6 +62,7 @@ rip_scenarios = [
     'cue_only',
     'errors',
     'verify_log',
+    'gnudb',
 ]
 
 foreach s : rip_scenarios
