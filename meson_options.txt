@@ -1,0 +1,2 @@
+option('version_suffix', type: 'string', value: '',
+       description: 'Appended to the version that cyanrip shows and writes to tags')

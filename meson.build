@@ -9,6 +9,7 @@ conf = configuration_data()
 
 conf.set_quoted('PROJECT_NAME', meson.project_name())
 conf.set_quoted('PROJECT_VERSION_STRING', meson.project_version())
+conf.set_quoted('PROJECT_DISPLAY_VERSION', meson.project_version() + get_option('version_suffix'))
 
 version_split = meson.project_version().split('.')
 ver_major = version_split[0]

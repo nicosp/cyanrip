@@ -255,7 +255,7 @@ void cyanrip_log_track_end(cyanrip_ctx *ctx, cyanrip_track *t)
 
 void cyanrip_log_start_report(cyanrip_ctx *ctx)
 {
-    cyanrip_log(ctx, 0, "cyanrip %s (%s)\n", PROJECT_VERSION_STRING, vcstag);
+    cyanrip_log(ctx, 0, "cyanrip %s (%s)\n", PROJECT_DISPLAY_VERSION, vcstag);
     cdio_hwinfo_t hwinfo;
     const int hwinfo_success = cdio_get_hwinfo(ctx->cdio, &hwinfo);
     if (!hwinfo_success)

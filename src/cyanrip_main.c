@@ -1575,7 +1575,7 @@ int main(int argc, char **argv)
     int nb_track_cover_arts = 0;
 
     snprintf(cyanrip_helpstr, sizeof(cyanrip_helpstr),
-             "cyanrip %s (%s)", PROJECT_VERSION_STRING, vcstag);
+             "cyanrip %s (%s)", PROJECT_DISPLAY_VERSION, vcstag);
 
     GEN_OPT_INIT(opts_list, 64);
 
@@ -2014,7 +2014,7 @@ int main(int argc, char **argv)
 
     /* Default album title */
     av_dict_set(&ctx->meta, "album", "Unknown disc", 0);
-    av_dict_set(&ctx->meta, "comment", "cyanrip "PROJECT_VERSION_STRING, 0);
+    av_dict_set(&ctx->meta, "comment", "cyanrip "PROJECT_DISPLAY_VERSION, 0);
     av_dict_set(&ctx->meta, "media",
                 ctx->settings.decode_hdcd ? "HDCD" : "CD", 0);
     const char *barcode_id = dict_get(ctx->meta, "barcode");
